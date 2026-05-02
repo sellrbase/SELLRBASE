@@ -89,10 +89,10 @@ function useAlerts(inv,exp,bizId){
 }
 const NAV=[
   {id:"dashboard",icon:"⊞",label:"Dashboard",group:"MAIN"},
-  {id:"quick",icon:"⚡",label:"Quick Sale",group:"MAIN"},
+  {id:"quick",icon:"⚡",label:"Mark As Sold",group:"ACTIONS"},
+  {id:"add",icon:"➕",label:"Add Stock",group:"ACTIONS"},
+  {id:"edit",icon:"✏️",label:"Edit Stock",group:"ACTIONS"},
   {id:"inventory",icon:"📦",label:"Inventory",group:"STOCK"},
-  {id:"add",icon:"➕",label:"Add Stock",group:"STOCK"},
-  {id:"edit",icon:"✏️",label:"Edit Stock",group:"STOCK"},
   {id:"comp",icon:"🔎",label:"Comp & Pricing",group:"TOOLS"},
   {id:"expenses",icon:"🧾",label:"Expenses",group:"TOOLS"},
   {id:"calendar",icon:"📅",label:"Calendar",group:"TOOLS"},
@@ -105,14 +105,15 @@ export default function App(){
   const[sess,setSess]=useState(null);const[boot,setBoot]=useState(true);const[screen,setScreen]=useState("land");
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setSess(data.session);if(data.session)setScreen("app");setBoot(false);});
-    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,s)=>{setSess(s);if(s)setScreen("app");else setScreen("land");});
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,s)=>{setSess(s);if(s&&screen!=="createbiz")setScreen("app");else if(!s)setScreen("land");});
     return()=>subscription.unsubscribe();
   },[]);
   if(boot)return<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:C.bg}}><Spin/></div>;
   return<><style>{GR}</style>
     {screen==="app"&&sess?<Shell onOut={()=>{supabase.auth.signOut();setScreen("land");}}/>:
-     screen==="login"?<Auth mode="login" onBack={()=>setScreen("land")} onSwitch={()=>setScreen("signup")}/>:
-     screen==="signup"?<Auth mode="signup" onBack={()=>setScreen("land")} onSwitch={()=>setScreen("login")}/>:
+     screen==="login"?<AuthLogin onBack={()=>setScreen("land")} onSwitch={()=>setScreen("signup")}/>:
+     screen==="signup"?<AuthSignup onBack={()=>setScreen("land")} onSwitch={()=>setScreen("login")} onDone={()=>setScreen("createbiz")}/>:
+     screen==="createbiz"?<CreateFirstBiz onDone={()=>setScreen("app")}/>:
      <Landing onLogin={()=>setScreen("login")} onSignup={()=>setScreen("signup")}/>}
   </>;
 }
@@ -152,42 +153,98 @@ function Landing({onLogin,onSignup}){
     </div>
   </div>;
 }
-function Auth({mode,onBack,onSwitch}){
-  const[email,setEmail]=useState("");const[pass,setPass]=useState("");const[name,setName]=useState("");
-  const[busy,setBusy]=useState(false);const[err,setErr]=useState(null);const[done,setDone]=useState(false);
-  const go=async()=>{
-    setBusy(true);setErr(null);
-    if(mode==="signup"){
-      if(!name.trim()){setErr("Please enter your name.");setBusy(false);return;}
-      const{error}=await supabase.auth.signUp({email,password:pass,options:{data:{full_name:name}}});
-      if(error)setErr(error.message);else{await supabase.auth.signInWithPassword({email,password:pass});}
-    }else{
-      const{error}=await supabase.auth.signInWithPassword({email,password:pass});
-      if(error)setErr("Invalid email or password.");
-    }
-    setBusy(false);
-  };
+function AuthBg({ch}){
   return<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,position:"relative",overflow:"hidden"}}>
     <div style={{position:"absolute",inset:0,backgroundImage:"url(https://images.unsplash.com/photo-1441984904996-e0b6ba687e04?w=1800&q=85)",backgroundSize:"cover",backgroundPosition:"center",filter:"brightness(0.15)"}}/>
     <div style={{position:"absolute",inset:0,background:"rgba(12,15,29,0.82)"}}/>
-    <button onClick={onBack} style={{position:"absolute",top:20,left:20,zIndex:10,background:"rgba(255,255,255,0.06)",border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 14px",fontSize:12,cursor:"pointer",color:C.text2,fontFamily:"inherit"}}>← Back</button>
-    <div style={{position:"relative",width:"100%",maxWidth:400,zIndex:1}}>
-      <div style={{textAlign:"center",marginBottom:28}}>
-        <h1 style={{fontSize:32,fontWeight:900,color:C.text,letterSpacing:"-0.03em"}}>SELLR<span style={{color:C.accent}}>BASE</span></h1>
-        <p style={{fontSize:13,color:C.text2,marginTop:6}}>{mode==="login"?"Welcome back":"Create your free account"}</p>
-      </div>
-      <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
-          {mode==="signup"&&<Input label="Your Name" req placeholder="e.g. Tyler" value={name} onChange={e=>setName(e.target.value)}/>}
-          <Input label="Email" req type="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
-          <Input label="Password" req type="password" placeholder={mode==="signup"?"Min 6 characters":"Password"} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
-          {err&&<Msg ch={err}/>}
-          <Btn ch={busy?mode==="login"?"Signing in…":"Creating…":mode==="login"?"Sign In":"Create Account"} onClick={go} disabled={busy||!email||!pass} full/>
-          <div style={{textAlign:"center",fontSize:13,color:C.text2}}>
-            {mode==="login"?"No account? ":"Have one? "}<button onClick={onSwitch} style={{background:"none",border:"none",cursor:"pointer",color:C.accent,fontWeight:600,fontFamily:"inherit",fontSize:13}}>{mode==="login"?"Sign up free":"Sign in"}</button>
-          </div>
-        </div>}/>
-    </div>
+    <div style={{position:"relative",width:"100%",maxWidth:420,zIndex:1}}>{ch}</div>
   </div>;
+}
+function AuthLogin({onBack,onSwitch}){
+  const[email,setEmail]=useState("");const[pass,setPass]=useState("");const[busy,setBusy]=useState(false);const[err,setErr]=useState(null);
+  const go=async()=>{
+    setBusy(true);setErr(null);
+    const{error}=await supabase.auth.signInWithPassword({email,password:pass});
+    if(error)setErr("Invalid email or password.");
+    setBusy(false);
+  };
+  return<AuthBg ch={<>
+    <div style={{textAlign:"center",marginBottom:28}}>
+      <h1 style={{fontSize:32,fontWeight:900,color:C.text,letterSpacing:"-0.03em"}}>SELLR<span style={{color:C.accent}}>BASE</span></h1>
+      <p style={{fontSize:13,color:C.text2,marginTop:6}}>Welcome back — sign in to your account</p>
+    </div>
+    <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <Input label="Email" req type="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
+      <Input label="Password" req type="password" placeholder="Password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
+      {err&&<Msg ch={err}/>}
+      <Btn ch={busy?"Signing in…":"Sign In"} onClick={go} disabled={busy||!email||!pass} full/>
+      <div style={{textAlign:"center",fontSize:13,color:C.text2}}>No account? <button onClick={onSwitch} style={{background:"none",border:"none",cursor:"pointer",color:C.accent,fontWeight:600,fontFamily:"inherit",fontSize:13}}>Sign up free</button></div>
+      <button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",color:C.text3,fontSize:12,fontFamily:"inherit",textAlign:"center"}}>← Back to home</button>
+    </div>}/>
+  </>}/>;
+}
+function AuthSignup({onBack,onSwitch,onDone}){
+  const[step,setStep]=useState(1);
+  const[name,setName]=useState("");const[email,setEmail]=useState("");const[pass,setPass]=useState("");const[pass2,setPass2]=useState("");
+  const[busy,setBusy]=useState(false);const[err,setErr]=useState(null);
+  const goAccount=async()=>{
+    if(!name.trim()){setErr("Please enter your name.");return;}
+    if(!email.trim()){setErr("Please enter your email.");return;}
+    if(pass.length<6){setErr("Password must be at least 6 characters.");return;}
+    if(pass!==pass2){setErr("Passwords do not match.");return;}
+    setBusy(true);setErr(null);
+    const{error}=await supabase.auth.signUp({email,password:pass,options:{data:{full_name:name}}});
+    if(error){setErr(error.message);setBusy(false);return;}
+    const{error:e2}=await supabase.auth.signInWithPassword({email,password:pass});
+    if(e2){setErr(e2.message);setBusy(false);return;}
+    setStep(2);setBusy(false);
+  };
+  const steps=[{n:1,l:"Your Details"},{n:2,l:"Your Business"}];
+  return<AuthBg ch={<>
+    <div style={{textAlign:"center",marginBottom:24}}>
+      <h1 style={{fontSize:32,fontWeight:900,color:C.text,letterSpacing:"-0.03em"}}>SELLR<span style={{color:C.accent}}>BASE</span></h1>
+      <p style={{fontSize:13,color:C.text2,marginTop:6}}>Create your free account</p>
+    </div>
+    <div style={{display:"flex",gap:8,marginBottom:20}}>
+      {steps.map(s=><div key={s.n} style={{flex:1,textAlign:"center"}}>
+        <div style={{height:3,borderRadius:2,background:step>=s.n?C.accent:"rgba(255,255,255,0.1)",marginBottom:6,transition:"background 0.3s"}}/>
+        <div style={{fontSize:10,fontWeight:700,color:step>=s.n?C.accent:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>Step {s.n} — {s.l}</div>
+      </div>)}
+    </div>
+    {step===1&&<Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <Input label="Your Name" req placeholder="e.g. Tyler" value={name} onChange={e=>setName(e.target.value)}/>
+      <Input label="Email Address" req type="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)}/>
+      <Input label="Password" req type="password" placeholder="Min 6 characters" value={pass} onChange={e=>setPass(e.target.value)}/>
+      <Input label="Confirm Password" req type="password" placeholder="Same again" value={pass2} onChange={e=>setPass2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&goAccount()}/>
+      {err&&<Msg ch={err}/>}
+      <Btn ch={busy?"Creating account…":"Next — Create Your Business →"} onClick={goAccount} disabled={busy||!name||!email||!pass||!pass2} full/>
+      <div style={{textAlign:"center",fontSize:13,color:C.text2}}>Already have an account? <button onClick={onSwitch} style={{background:"none",border:"none",cursor:"pointer",color:C.accent,fontWeight:600,fontFamily:"inherit",fontSize:13}}>Sign in</button></div>
+      <button onClick={onBack} style={{background:"none",border:"none",cursor:"pointer",color:C.text3,fontSize:12,fontFamily:"inherit",textAlign:"center"}}>← Back to home</button>
+    </div>}/>}
+    {step===2&&<CreateFirstBiz onDone={onDone}/>}
+  </>}/>;
+}
+function CreateFirstBiz({onDone}){
+  const[bizName,setBizName]=useState("");const[desc,setDesc]=useState("");const[busy,setBusy]=useState(false);const[err,setErr]=useState(null);
+  const save=async()=>{
+    if(!bizName.trim())return;setBusy(true);setErr(null);
+    const{data:{user}}=await supabase.auth.getUser();
+    const{error}=await supabase.from("businesses").insert([{name:bizName.trim(),description:desc.trim()||null,user_id:user.id,colour:C.accent}]);
+    if(error){setErr(error.message);setBusy(false);return;}
+    onDone();
+  };
+  return<Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
+    <div style={{textAlign:"center",paddingBottom:4}}>
+      <div style={{fontSize:28,marginBottom:8}}>🏢</div>
+      <div style={{fontSize:16,fontWeight:800,color:C.text,marginBottom:4}}>Name your business</div>
+      <div style={{fontSize:13,color:C.text2,lineHeight:1.6}}>This is how your reselling operation will appear inside SELLRBASE. You can add more businesses later.</div>
+    </div>
+    <Divider/>
+    <Input label="Business Name" req placeholder="e.g. Tyler's Reselling" value={bizName} onChange={e=>setBizName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&save()}/>
+    <Input label="Description (optional)" placeholder="e.g. eBay & Vinted clothing" value={desc} onChange={e=>setDesc(e.target.value)}/>
+    {err&&<Msg ch={err}/>}
+    <Btn ch={busy?"Setting up…":"Let's Go →"} onClick={save} disabled={busy||!bizName.trim()} full/>
+  </div>}/>;
 }
 function CreateBizForm({onDone,onOut,compact=false}){
   const[name,setName]=useState("");const[desc,setDesc]=useState("");const[busy,setBusy]=useState(false);const[err,setErr]=useState(null);
@@ -243,7 +300,7 @@ function Shell({onOut}){
       <CreateBizForm onDone={loadBiz} onOut={onOut}/>
     </div>
   </div>;
-  const groups=["MAIN","STOCK","TOOLS","INSIGHTS"];
+  const groups=["MAIN","ACTIONS","STOCK","TOOLS","INSIGHTS"];
   const SidebarContent=()=><div style={{width:230,background:C.card,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",height:"100vh",position:"sticky",top:0,flexShrink:0}}>
     <div style={{padding:"20px 16px 16px",borderBottom:`1px solid ${C.border}`}}>
       <div style={{fontSize:18,fontWeight:900,color:C.text,letterSpacing:"-0.02em",marginBottom:12}}>SELLR<span style={{color:C.accent}}>BASE</span></div>
@@ -254,7 +311,7 @@ function Shell({onOut}){
     </div>
     <nav style={{flex:1,padding:"8px 10px",overflowY:"auto"}}>
       {groups.map(g=>{const items=NAV.filter(n=>n.group===g);if(!items.length)return null;return<div key={g} style={{marginBottom:4}}>
-        {g!=="MAIN"&&<div style={{fontSize:9,fontWeight:700,color:C.text3,letterSpacing:"0.12em",padding:"8px 10px 3px",textTransform:"uppercase"}}>{g}</div>}
+        {g!=="MAIN"&&<div style={{fontSize:9,fontWeight:700,color:C.text3,letterSpacing:"0.12em",padding:"8px 10px 3px",textTransform:"uppercase"}}>{g==="ACTIONS"?"QUICK ACTIONS":g}</div>}
         {items.map(item=>{const active=page===item.id;return<button key={item.id} onClick={()=>nav(item.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:9,background:active?C.accentL:"transparent",border:active?`1px solid ${C.accentB}`:"1px solid transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left",marginBottom:1,transition:"all 0.12s"}}>
           <span style={{fontSize:15,width:18,textAlign:"center",flexShrink:0}}>{item.icon}</span>
           <span style={{fontSize:13,fontWeight:active?700:400,color:active?C.accent:C.text2}}>{item.label}</span>
@@ -313,66 +370,44 @@ function Shell({onOut}){
   </div>;
 }
 function Dashboard({inv,exp,tgts,biz,navEdit}){
-  const[period,setPeriod]=useState("month");
-  const PERIODS=[{id:"today",l:"Today"},{id:"week",l:"This Week"},{id:"month",l:"This Month"},{id:"year",l:"This Year"},{id:"all",l:"All Time"}];
   const now=new Date();
-  const getStart=p=>{
-    if(p==="today")return new Date(now.getFullYear(),now.getMonth(),now.getDate());
-    if(p==="week"){const d=new Date(now);d.setDate(d.getDate()-((d.getDay()+6)%7));d.setHours(0,0,0,0);return d;}
-    if(p==="month")return new Date(now.getFullYear(),now.getMonth(),1);
-    if(p==="year")return new Date(now.getFullYear(),0,1);
-    return new Date(0);
-  };
-  const start=getStart(period);
+  const todayStr=today();
+  const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
   const soldAll=inv.filter(i=>i.sold);
-  const soldP=period==="all"?soldAll:soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=start);
-  const expsP=period==="all"?exp:exp.filter(e=>e.date&&new Date(e.date)>=start);
-  const revenue=r2(soldP.reduce((s,i)=>s+(i.sold_price||i.price),0));
-  const costs=r2(soldP.filter(i=>i.cost!=null).reduce((s,i)=>s+i.cost,0));
-  const expTotal=r2(expsP.reduce((s,e)=>s+e.amount,0));
-  const grossProfit=r2(revenue-costs);
-  const netProfit=r2(grossProfit-expTotal);
-  const avgSale=soldP.length?r2(revenue/soldP.length):0;
   const listed=inv.filter(i=>!i.sold);
-  const withDates=soldP.filter(i=>i.sold_at&&i.created_at);
-  const avgDays=withDates.length?Math.round(withDates.reduce((s,i)=>s+Math.max(0,Math.floor((new Date(i.sold_at)-new Date(i.created_at))/86400000)),0)/withDates.length):null;
-  const byDow={};soldP.forEach(i=>{if(!getSaleDate(i))return;const k=dowKey[new Date(getSaleDate(i)).getDay()];byDow[k]=(byDow[k]||0)+(i.sold_price||i.price);});
-  const bestDow=Object.entries(byDow).sort((a,b)=>b[1]-a[1])[0];
-  const biggest=soldP.length?soldP.reduce((b,i)=>(i.sold_price||i.price)>(b.sold_price||b.price)?i:b,soldP[0]):null;
-  const roi=costs>0?Math.round((grossProfit/costs)*100):null;
-  const str=inv.length>0?pct(soldAll.length,inv.length):0;
-  const byPlatform={};soldP.forEach(i=>{const p=i.platform||"Other";byPlatform[p]=(byPlatform[p]||0)+(i.sold_price||i.price);});
-  const platMax=Math.max(...Object.values(byPlatform),1);
-  const mn=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const chartData=[];
-  if(period==="today")chartData.push({l:"Today",v:revenue,hi:true,fmt:fmt(revenue)});
-  else if(period==="week"){for(let i=6;i>=0;i--){const d=new Date(now);d.setDate(d.getDate()-i);const ds=d.toISOString().slice(0,10);const v=soldP.filter(x=>getSaleDate(x)===ds).reduce((s,x)=>s+(x.sold_price||x.price),0);chartData.push({l:dowKey[d.getDay()],v:r2(v),hi:i===0,fmt:fmt(r2(v))});}}
-  else if(period==="month"){const days=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();for(let i=1;i<=days;i++){const ds=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(i).padStart(2,"0")}`;const v=soldP.filter(x=>getSaleDate(x)===ds).reduce((s,x)=>s+(x.sold_price||x.price),0);chartData.push({l:String(i),v:r2(v),hi:i===now.getDate(),fmt:v>0?fmt(r2(v)):""});}}
-  else if(period==="year"){for(let m=0;m<=now.getMonth();m++){const v=soldP.filter(x=>getSaleDate(x)&&new Date(getSaleDate(x)).getMonth()===m).reduce((s,x)=>s+(x.sold_price||x.price),0);chartData.push({l:mn[m],v:r2(v),hi:m===now.getMonth(),fmt:fmt(r2(v))});}}
-  const recent=soldAll.filter(i=>getSaleDate(i)).sort((a,b)=>new Date(getSaleDate(b))-new Date(getSaleDate(a))).slice(0,5);
+  const todaySales=soldAll.filter(i=>getSaleDate(i)===todayStr);
+  const monthSales=soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=monthStart);
+  const todayRev=r2(todaySales.reduce((s,i)=>s+(i.sold_price||i.price),0));
+  const monthRev=r2(monthSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
+  const monthCosts=r2(monthSales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
+  const monthExp=r2(exp.filter(e=>e.date&&new Date(e.date)>=monthStart).reduce((s,e)=>s+e.amount,0));
+  const monthProfit=r2(monthRev-monthCosts-monthExp);
   const monthTarget=tgts.find(t=>t.period==="monthly");
-  const monthRev=r2(soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=new Date(now.getFullYear(),now.getMonth(),1)).reduce((s,i)=>s+(i.sold_price||i.price),0));
+  const recent=soldAll.filter(i=>getSaleDate(i)).sort((a,b)=>new Date(getSaleDate(b))-new Date(getSaleDate(a))).slice(0,8);
+  const dayName=now.toLocaleDateString("en-GB",{weekday:"long"});
+  const dateStr=now.toLocaleDateString("en-GB",{day:"numeric",month:"long"});
   return<div>
-    <PageHdr title={biz?.name||"Dashboard"} sub="SELLRBASE DASHBOARD"/>
-    <div style={{display:"flex",gap:6,marginBottom:24,flexWrap:"wrap"}}>
-      {PERIODS.map(p=><button key={p.id} onClick={()=>setPeriod(p.id)} style={{padding:"7px 16px",borderRadius:20,border:`1.5px solid ${period===p.id?C.accent:C.border2}`,background:period===p.id?C.accentL:"transparent",color:period===p.id?C.accent:C.text2,fontWeight:period===p.id?700:400,fontSize:13,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>{p.l}</button>)}
+    <div style={{marginBottom:20}}>
+      <div style={{fontSize:11,color:C.text3,textTransform:"uppercase",letterSpacing:"0.14em",marginBottom:4}}>SELLRBASE</div>
+      <h1 style={{fontSize:"clamp(20px,3vw,26px)",fontWeight:800,color:C.text}}>{dayName}, {dateStr}</h1>
+      <div style={{fontSize:13,color:C.text2,marginTop:3}}>{biz?.name}</div>
     </div>
-    <div style={{textAlign:"center",padding:"24px 20px",background:`linear-gradient(135deg,${C.accentL} 0%,transparent 100%)`,border:`1px solid ${C.accentB}`,borderRadius:18,marginBottom:20}}>
-      <div style={{fontSize:11,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Revenue — {PERIODS.find(p=>p.id===period)?.l||""}</div>
-      <div style={{fontSize:"clamp(36px,6vw,64px)",fontWeight:900,color:C.accent,letterSpacing:"-0.03em",lineHeight:1}}>{fmt(revenue)}</div>
-      {netProfit!==0&&<div style={{fontSize:13,color:netProfit>=0?C.green:C.red,marginTop:8,fontWeight:600}}>{netProfit>=0?"▲":"▼"} {fmt(Math.abs(netProfit))} net profit</div>}
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+      <div style={{background:`linear-gradient(135deg,${C.accentL},transparent)`,border:`1px solid ${C.accentB}`,borderRadius:14,padding:"18px"}}>
+        <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>Today's Revenue</div>
+        <div style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:900,color:C.accent,lineHeight:1}}>{fmt(todayRev)}</div>
+        <div style={{fontSize:12,color:C.text3,marginTop:4}}>{todaySales.length} sale{todaySales.length!==1?"s":""} today</div>
+      </div>
+      <div style={{background:`linear-gradient(135deg,rgba(16,185,129,0.1),transparent)`,border:"1px solid rgba(16,185,129,0.25)",borderRadius:14,padding:"18px"}}>
+        <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>This Month</div>
+        <div style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:900,color:C.green,lineHeight:1}}>{fmt(monthRev)}</div>
+        <div style={{fontSize:12,color:C.text3,marginTop:4}}>{monthSales.length} sale{monthSales.length!==1?"s":""} · {fmt(monthProfit)} profit</div>
+      </div>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:20}}>
-      <StatCard icon="📦" label="Items Sold" value={soldP.length} color={C.purple}/>
-      <StatCard icon="💹" label="Gross Profit" value={fmt(grossProfit)} color={C.green}/>
-      <StatCard icon="🏷️" label="In Stock" value={listed.length} color={C.gold}/>
-      <StatCard icon="💰" label="Stock Value" value={fmt(listed.reduce((s,i)=>s+i.price,0))} color={C.teal}/>
-      <StatCard icon="📈" label="Avg Sale" value={fmt(avgSale)} color={C.blue}/>
-      <StatCard icon="🧾" label="Expenses" value={fmt(expTotal)} color={C.red}/>
-      <StatCard icon="🏆" label="Biggest Sale" value={biggest?fmt(biggest.sold_price||biggest.price):"—"} color={C.gold}/>
-      <StatCard icon="⏱️" label="Avg Days to Sell" value={avgDays!=null?`${avgDays}D`:"—"} color={C.purple}/>
-      {roi!=null&&<StatCard icon="📊" label="ROI" value={`${roi}%`} color={roi>=0?C.green:C.red}/>}
-      <StatCard icon="🔄" label="Sell-Through" value={`${str}%`} color={C.teal}/>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+      <StatCard icon="🏷️" label="Listed" value={listed.length} color={C.gold}/>
+      <StatCard icon="💰" label="Stock Value" value={fmt(listed.reduce((s,i)=>s+i.price,0))} color={C.blue}/>
+      <StatCard icon="🧾" label="Month Expenses" value={fmt(monthExp)} color={C.red}/>
     </div>
     {monthTarget&&monthTarget.target_revenue&&<Card ch={<>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -382,20 +417,12 @@ function Dashboard({inv,exp,tgts,biz,navEdit}){
       <div style={{height:8,background:"rgba(255,255,255,0.05)",borderRadius:4,overflow:"hidden"}}>
         <div style={{height:"100%",width:`${Math.min(pct(monthRev,monthTarget.target_revenue),100)}%`,background:`linear-gradient(90deg,${C.accent}88,${C.accent})`,borderRadius:4,transition:"width 0.5s"}}/>
       </div>
-      <div style={{fontSize:11,color:C.text3,marginTop:5}}>{pct(monthRev,monthTarget.target_revenue)}% of monthly target</div>
-    </>} style={{marginBottom:20}}/>}
-    {chartData.length>0&&period!=="all"&&<Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Revenue Chart</div><BarChart data={chartData} color={C.accent} h={100}/></>} style={{marginBottom:20}}/>}
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
-      {Object.keys(byPlatform).length>0&&<Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>By Platform</div>{Object.entries(byPlatform).sort((a,b)=>b[1]-a[1]).map(([p,v])=><HBar key={p} label={p} value={v} max={platMax} color={C.accent} display={fmt(v)}/>)}</>}/>}
-      <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Key Insights</div>
-        {[{l:"Best day of week",v:bestDow?`${bestDow[0]} (${fmt(r2(bestDow[1]))})`:"—",hi:true},{l:"Net after expenses",v:fmt(netProfit),hi:true},{l:"ROI",v:roi!=null?`${roi}%`:"—"},{l:"Sell-through",v:`${str}%`}].map(s=><div key={s.l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
-          <span style={{fontSize:12,color:C.text2}}>{s.l}</span><span style={{fontSize:13,fontWeight:700,color:s.hi?C.accent:C.text}}>{s.v}</span>
-        </div>)}
-      </>}/>
-    </div>
-    {recent.length>0&&<Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Recent Sales</div>
-      {recent.map(i=><div key={i.id} onClick={()=>navEdit(i.sku)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
-        <div><div style={{fontSize:13,fontWeight:600,color:C.text,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.title}</div><div style={{fontSize:11,color:C.text3,marginTop:2}}>{i.sku} · {getSaleDate(i)} · {i.platform||"—"}</div></div>
+      <div style={{fontSize:11,color:C.text3,marginTop:5}}>{pct(monthRev,monthTarget.target_revenue)}% of target</div>
+    </>} style={{marginBottom:16}}/>}
+    {recent.length>0&&<Card ch={<>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Recent Sales</div>
+      {recent.map(i=><div key={i.id} onClick={()=>navEdit(i.sku||i.title)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
+        <div><div style={{fontSize:13,fontWeight:600,color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.title}</div><div style={{fontSize:11,color:C.text3,marginTop:2}}>{i.sku&&`${i.sku} · `}{getSaleDate(i)}{i.platform&&` · ${i.platform}`}</div></div>
         <div style={{textAlign:"right",marginLeft:12,flexShrink:0}}><div style={{fontSize:14,fontWeight:700,color:C.green}}>{fmt(i.sold_price||i.price)}</div>{i.cost&&<div style={{fontSize:11,color:C.text3}}>cost {fmt(i.cost)}</div>}</div>
       </div>)}
     </>}/>}
@@ -405,17 +432,19 @@ function QuickSale({inv,biz,reload}){
   const[q,setQ]=useState("");const[found,setFound]=useState(null);const[nf,setNf]=useState(false);
   const[soldFor,setSoldFor]=useState("");const[atList,setAtList]=useState(true);const[soldAt,setSoldAt]=useState(today());
   const[busy,setBusy]=useState(false);const[ok,setOk]=useState(false);const[err,setErr]=useState(null);
+  const[platform,setPlatform]=useState("eBay");
+  const PLATS=["eBay","Vinted","Depop","Poshmark","Facebook","Instagram","Etsy","Other"];
   const search=async()=>{setNf(false);setFound(null);setOk(false);setErr(null);const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",q.trim()).single();if(!data)setNf(true);else{setFound(data);setSoldFor(String(data.price));setAtList(true);}};
   const save=async()=>{
     if(!found)return;if(!atList&&(!soldFor||parseFloat(soldFor)<=0)){setErr("Enter the sold price.");return;}
     setBusy(true);setErr(null);
     const sp=atList?r2(found.price):r2(parseFloat(soldFor));
-    const{error}=await supabase.from("inventory").update({sold:true,sold_at:soldAt,sold_price:sp}).eq("id",found.id);
-    if(error)setErr(error.message);else{setOk(true);setFound(null);setQ("");reload();}
+    const{error}=await supabase.from("inventory").update({sold:true,sold_at:soldAt,sold_price:sp,platform}).eq("id",found.id);
+    if(error)setErr(error.message);else{setOk(true);setFound(null);setQ("");setPlatform("eBay");reload();}
     setBusy(false);
   };
   return<div style={{maxWidth:480,margin:"0 auto"}}>
-    <PageHdr title="Quick Sale" sub="MARK AS SOLD"/>
+    <PageHdr title="Mark As Sold" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"flex",gap:10}}>
         <input style={{...DI,flex:1}} placeholder="Enter SKU…" value={q} onChange={e=>{setQ(e.target.value);setNf(false);setOk(false);}} onKeyDown={e=>e.key==="Enter"&&search()}/>
@@ -425,16 +454,23 @@ function QuickSale({inv,biz,reload}){
     </div>}/>
     {found&&<Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-        <div><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{found.sku}</span><div style={{fontSize:16,fontWeight:700,color:C.text,marginTop:8}}>{found.title}</div>{found.cost&&<div style={{fontSize:12,color:C.text3,marginTop:3}}>Cost: {fmt(found.cost)}</div>}</div>
+        <div>
+          {found.sku&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{found.sku}</span>}
+          <div style={{fontSize:16,fontWeight:700,color:C.text,marginTop:found.sku?8:0}}>{found.title}</div>
+          {found.cost&&<div style={{fontSize:12,color:C.text3,marginTop:3}}>Cost: {fmt(found.cost)}</div>}
+        </div>
         <span style={{fontSize:14,fontWeight:700,color:C.accent}}>{fmt(found.price)}</span>
       </div>
       <Divider/>
-      <Input label="Date Sold" type="date" value={soldAt} onChange={e=>setSoldAt(e.target.value)}/>
-      <div onClick={()=>{setAtList(!atList);setSoldFor(String(found.price));}} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:C.accentL,borderRadius:10,border:`1px solid ${atList?C.accentB:C.border}`,cursor:"pointer"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Input label="Date Sold" type="date" value={soldAt} onChange={e=>setSoldAt(e.target.value)}/>
+        <Sel label="Platform Sold On" ch={PLATS.map(p=><option key={p}>{p}</option>)} value={platform} onChange={e=>setPlatform(e.target.value)}/>
+      </div>
+      <Input label="Sold Price (£)" type="number" placeholder={String(found.price)} value={soldFor} onChange={e=>{setSoldFor(e.target.value);setAtList(parseFloat(e.target.value)===found.price);}}/>
+      <div onClick={()=>{setAtList(!atList);setSoldFor(String(found.price));}} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:C.accentL,borderRadius:10,border:`1px solid ${atList?C.accentB:C.border}`,cursor:"pointer"}}>
         <div style={{width:20,height:20,borderRadius:5,border:`2px solid ${atList?C.accent:C.text3}`,background:atList?C.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{atList&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}</div>
         <span style={{fontSize:13,color:atList?C.accent:C.text2}}>Sold at list price ({fmt(found.price)})</span>
       </div>
-      {!atList&&<Input label="Actual Sold Price (£) *" req type="number" placeholder="0.00" value={soldFor===String(found.price)?"":soldFor} onChange={e=>setSoldFor(e.target.value)}/>}
       {err&&<Msg ch={err}/>}
       <Btn ch={busy?"Saving…":"Mark as Sold ✓"} onClick={save} disabled={busy} full/>
     </div>} style={{marginTop:16}}/>}
@@ -503,21 +539,17 @@ function AddStock({biz,reload,addForm,setAddForm}){
   const[busy,setBusy]=useState(false);const[ok,setOk]=useState(false);const[err,setErr]=useState(null);
   const f=k=>e=>setAddForm(p=>({...p,[k]:e.target.value}));
   const CATS=["Clothing","Footwear","Electronics","Collectibles","Books","Homeware","Toys","Jewellery","Art","Vintage","Other"];
-  const PLATS=["eBay","Vinted","Depop","Poshmark","Facebook","Instagram","Etsy","Other"];
   const save=async()=>{
-    if(!addForm.sku||!addForm.title||!addForm.price)return;setBusy(true);setErr(null);
-    const{error}=await supabase.from("inventory").insert([{business_id:biz.id,sku:addForm.sku.trim().toUpperCase(),title:addForm.title.trim(),cost:addForm.cost?r2(parseFloat(addForm.cost)):null,price:r2(parseFloat(addForm.price)),note:addForm.note.trim()||null,platform:addForm.platform||"eBay",category:addForm.category||"Other",location:addForm.location.trim()||null,sold:false}]);
-    if(error)setErr(error.message);else{setAddForm({sku:"",title:"",cost:"",price:"",note:"",platform:"eBay",category:"Clothing",location:""});setOk(true);setTimeout(()=>setOk(false),3000);reload();}
+    if(!addForm.title||!addForm.price)return;setBusy(true);setErr(null);
+    const{error}=await supabase.from("inventory").insert([{business_id:biz.id,sku:addForm.sku.trim().toUpperCase()||null,title:addForm.title.trim(),cost:addForm.cost?r2(parseFloat(addForm.cost)):null,price:r2(parseFloat(addForm.price)),note:addForm.note.trim()||null,category:addForm.category||"Other",location:addForm.location.trim()||null,sold:false}]);
+    if(error)setErr(error.message);else{setAddForm({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:""});setOk(true);setTimeout(()=>setOk(false),3000);reload();}
     setBusy(false);
   };
   return<div style={{maxWidth:560,margin:"0 auto"}}>
-    <PageHdr title="Add Stock" sub="INVENTORY"/>
+    <PageHdr title="Add Stock" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Input label="SKU / Reference" req placeholder="e.g. VTG-001" value={addForm.sku} onChange={f("sku")}/>
-        <Sel label="Platform" ch={PLATS.map(p=><option key={p}>{p}</option>)} value={addForm.platform} onChange={f("platform")}/>
-      </div>
       <Input label="Item Title" req placeholder="e.g. Vintage Carhartt Chore Coat" value={addForm.title} onChange={f("title")}/>
+      <Input label="SKU / Reference (optional)" placeholder="e.g. B001" value={addForm.sku} onChange={f("sku")}/>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Input label="Cost Price (£)" type="number" placeholder="12.00" value={addForm.cost} onChange={f("cost")}/>
         <Input label="Listing Price (£)" req type="number" placeholder="45.00" value={addForm.price} onChange={f("price")}/>
@@ -528,68 +560,53 @@ function AddStock({biz,reload,addForm,setAddForm}){
       </div>
       <Input label="Notes" placeholder="e.g. Size M, minor fading" value={addForm.note} onChange={f("note")}/>
       {err&&<Msg ch={err}/>}{ok&&<Msg ok ch="✅ Added to inventory!"/>}
-      <Btn ch={busy?"Saving…":"Add to Inventory"} onClick={save} disabled={busy||!addForm.sku||!addForm.title||!addForm.price} full/>
+      <Btn ch={busy?"Saving…":"Add to Inventory"} onClick={save} disabled={busy||!addForm.title||!addForm.price} full/>
     </div>}/>
   </div>;
 }
 function EditStock({biz,reload,editSku}){
   const[q,setQ]=useState(editSku||"");const[found,setFound]=useState(null);const[nf,setNf]=useState(false);
   const[ed,setEd]=useState(null);const[busy,setBusy]=useState(false);const[ok,setOk]=useState(false);const[err,setErr]=useState(null);
-  const PLATS=["eBay","Vinted","Depop","Poshmark","Facebook","Instagram","Etsy","Other"];
   const CATS=["Clothing","Footwear","Electronics","Collectibles","Books","Homeware","Toys","Jewellery","Art","Vintage","Other"];
   useEffect(()=>{if(editSku)doSearch(editSku);},[]);
   const doSearch=async(sku)=>{
     const s=(sku||q).trim();if(!s)return;setNf(false);setFound(null);setOk(false);setErr(null);
     const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",s).single();
-    if(!data)setNf(true);else{setFound(data);setEd({price:data.price,note:data.note||"",sold:data.sold,sold_at:data.sold_at||today(),atList:!data.sold_price||data.sold_price===data.price,soldFor:String(data.sold_price||data.price),platform:data.platform||"eBay",category:data.category||"Clothing",location:data.location||""});}
+    if(!data)setNf(true);else{setFound(data);setEd({price:data.price,note:data.note||"",category:data.category||"Clothing",location:data.location||""});}
   };
-  const canSave=()=>{if(!ed)return false;if(ed.sold){if(ed.atList)return true;return ed.soldFor&&parseFloat(ed.soldFor)>0;}return true;};
   const save=async()=>{
-    if(!canSave())return;setBusy(true);setErr(null);
-    const sp=ed.sold?(ed.atList?r2(parseFloat(ed.price)):r2(parseFloat(ed.soldFor))):null;
-    const updates={price:r2(parseFloat(ed.price)),note:ed.note||null,sold:ed.sold,platform:ed.platform,category:ed.category,location:ed.location||null};
-    if(ed.sold){updates.sold_at=ed.sold_at;updates.sold_price=sp;}
+    if(!ed)return;setBusy(true);setErr(null);
+    const updates={price:r2(parseFloat(ed.price)),note:ed.note||null,category:ed.category,location:ed.location||null};
     const{error}=await supabase.from("inventory").update(updates).eq("id",found.id);
     if(error)setErr(error.message);else{setOk(true);setTimeout(()=>setOk(false),2500);reload();setFound(p=>({...p,...updates}));}
     setBusy(false);
   };
   const del=async()=>{if(!found||!window.confirm("Delete permanently?"))return;await supabase.from("inventory").delete().eq("id",found.id);setFound(null);setEd(null);setQ("");reload();};
   return<div style={{maxWidth:560,margin:"0 auto"}}>
-    <PageHdr title="Edit Stock" sub="INVENTORY"/>
+    <PageHdr title="Edit Stock" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",gap:10}}>
-      <input style={{...DI,flex:1}} placeholder="Enter SKU…" value={q} onChange={e=>{setQ(e.target.value);setNf(false);}} onKeyDown={e=>e.key==="Enter"&&doSearch()}/>
+      <input style={{...DI,flex:1}} placeholder="Search by SKU or title…" value={q} onChange={e=>{setQ(e.target.value);setNf(false);}} onKeyDown={e=>e.key==="Enter"&&doSearch()}/>
       <Btn ch="Search" onClick={()=>doSearch()} disabled={!q.trim()}/>
     </div>} style={{marginBottom:14}}/>
     {nf&&<Msg ch={`No item found: "${q}"`}/>}
     {found&&ed&&<Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-        <div><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{found.sku}</span><div style={{fontSize:17,fontWeight:700,color:C.text,marginTop:8}}>{found.title}</div>{found.cost&&<div style={{fontSize:12,color:C.text3,marginTop:3}}>Cost: {fmt(found.cost)}</div>}</div>
-        <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:ed.sold?C.greenL:C.goldL,color:ed.sold?C.green:C.gold}}>{ed.sold?"SOLD":"LISTED"}</span>
+      <div>
+        {found.sku&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{found.sku}</span>}
+        <div style={{fontSize:17,fontWeight:700,color:C.text,marginTop:found.sku?8:0}}>{found.title}</div>
+        <div style={{display:"flex",gap:16,marginTop:6}}>
+          {found.cost&&<span style={{fontSize:12,color:C.text3}}>Cost: {fmt(found.cost)}</span>}
+          <span style={{fontSize:12,color:C.text2}}>Listed at: {fmt(found.price)}</span>
+        </div>
       </div>
       <Divider/>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Input label="Listing Price (£)" type="number" value={ed.price} onChange={e=>setEd(p=>({...p,price:e.target.value,soldFor:p.atList?e.target.value:p.soldFor}))}/>
-        <Sel label="Platform" ch={PLATS.map(p=><option key={p}>{p}</option>)} value={ed.platform} onChange={e=>setEd(p=>({...p,platform:e.target.value}))}/>
-      </div>
+      <Input label="Listing Price (£)" type="number" value={ed.price} onChange={e=>setEd(p=>({...p,price:e.target.value}))}/>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Sel label="Category" ch={CATS.map(c=><option key={c}>{c}</option>)} value={ed.category} onChange={e=>setEd(p=>({...p,category:e.target.value}))}/>
         <Input label="Location" placeholder="e.g. Box 3" value={ed.location} onChange={e=>setEd(p=>({...p,location:e.target.value}))}/>
       </div>
       <Input label="Notes" value={ed.note} onChange={e=>setEd(p=>({...p,note:e.target.value}))}/>
-      <div onClick={()=>setEd(p=>({...p,sold:!p.sold}))} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:ed.sold?C.greenL:C.card2,borderRadius:10,border:`1px solid ${ed.sold?"rgba(16,185,129,0.3)":C.border}`,cursor:"pointer"}}>
-        <div style={{width:20,height:20,borderRadius:5,border:`2px solid ${ed.sold?C.green:C.text3}`,background:ed.sold?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{ed.sold&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}</div>
-        <span style={{fontSize:13,color:ed.sold?C.green:C.text2,fontWeight:ed.sold?600:400}}>Mark as Sold</span>
-      </div>
-      {ed.sold&&<>
-        <Input label="Date Sold" type="date" value={ed.sold_at} onChange={e=>setEd(p=>({...p,sold_at:e.target.value}))}/>
-        <div onClick={()=>setEd(p=>({...p,atList:!p.atList,soldFor:!p.atList?p.price:p.soldFor}))} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:C.accentL,borderRadius:10,border:`1px solid ${ed.atList?C.accentB:C.border}`,cursor:"pointer"}}>
-          <div style={{width:20,height:20,borderRadius:5,border:`2px solid ${ed.atList?C.accent:C.text3}`,background:ed.atList?C.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{ed.atList&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}</div>
-          <span style={{fontSize:13,color:ed.atList?C.accent:C.text2}}>Sold at list price ({fmt(ed.price)})</span>
-        </div>
-        {!ed.atList&&<Input label="Actual Sold Price (£) *" req type="number" placeholder="0.00" value={ed.soldFor===ed.price?"":ed.soldFor} onChange={e=>setEd(p=>({...p,soldFor:e.target.value}))}/>}
-      </>}
       {err&&<Msg ch={err}/>}{ok&&<Msg ok ch="✅ Changes saved!"/>}
-      <div style={{display:"flex",gap:10}}><Btn ch={busy?"Saving…":"Save Changes"} onClick={save} disabled={!canSave()||busy} full/><Btn ch="Delete" onClick={del} variant="danger"/></div>
+      <div style={{display:"flex",gap:10}}><Btn ch={busy?"Saving…":"Save Changes"} onClick={save} disabled={!ed||busy} full/><Btn ch="Delete" onClick={del} variant="danger"/></div>
     </div>}/>}
   </div>;
 }
@@ -1045,5 +1062,3 @@ function Settings({biz,bizList,onBizChange,onBizCreated,onBizDeleted,onOut}){
     }/>}
   </div>;
 }
-
-    

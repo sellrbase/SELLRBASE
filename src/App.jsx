@@ -68,23 +68,32 @@ const HBar=({label,value,max,color=C.accent,display})=><div style={{display:"fle
   </div>
   <div style={{fontSize:12,fontWeight:700,color,minWidth:64,textAlign:"right"}}>{display||value}</div>
 </div>;
-function useAlerts(inv,exp,bizId){
+function useAlerts(inv,exp,tgts,bizId){
   const[alerts,setAlerts]=useState([]);
   useEffect(()=>{
     if(!bizId)return;const now=new Date();const list=[];
+    // Tax year end
     const yr=now.getMonth()>=3?now.getFullYear():now.getFullYear()-1;
     const taxEnd=new Date(`${yr+1}-04-05`);const daysLeft=Math.ceil((taxEnd-now)/86400000);
     if(daysLeft>0&&daysLeft<=60)list.push({id:"taxend",type:"warning",msg:`Tax year ends in ${daysLeft} days (5 April ${yr+1}). Make sure your records are complete.`});
+    // HMRC thresholds
     const txStart=new Date(`${yr}-04-06`);
     const revenue=inv.filter(i=>i.sold&&getSaleDate(i)&&new Date(getSaleDate(i))>=txStart).reduce((s,i)=>s+(i.sold_price||i.price),0);
-    if(revenue>PERSONAL_ALLOWANCE)list.push({id:"selfemploy",type:"danger",msg:`Trading income this tax year is ${fmt(revenue)} — above the £${PERSONAL_ALLOWANCE.toLocaleString()} personal allowance. You must register for Self Assessment with HMRC.`});
-    else if(revenue>TRADING_ALLOWANCE)list.push({id:"trading",type:"warning",msg:`Trading income is ${fmt(revenue)}. You have exceeded the £1,000 trading allowance — track expenses carefully.`});
+    if(revenue>PERSONAL_ALLOWANCE)list.push({id:"selfemploy",type:"danger",msg:`Trading income this tax year is ${fmt(revenue)} — above the £${PERSONAL_ALLOWANCE.toLocaleString()} personal allowance. Register for Self Assessment with HMRC.`});
+    else if(revenue>TRADING_ALLOWANCE)list.push({id:"trading",type:"warning",msg:`Trading income is ${fmt(revenue)} — above the £1,000 trading allowance. Track expenses carefully.`});
+    // Upcoming bills
     exp.filter(e=>e.due_date).forEach(e=>{
       const days=Math.ceil((new Date(e.due_date)-now)/86400000);
       if(days>=0&&days<=14)list.push({id:`bill-${e.id}`,type:days<=3?"danger":"warning",msg:`Bill due ${days===0?"today":days===1?"tomorrow":`in ${days} days`}: "${e.description}" — ${fmt(e.amount)}`});
     });
+    // Stale listings — 28+ days danger, 14+ days warning
+    const listed=inv.filter(i=>!i.sold&&i.created_at);
+    const stale28=listed.filter(i=>Math.floor((now-new Date(i.created_at))/86400000)>=28);
+    const stale14=listed.filter(i=>{const d=Math.floor((now-new Date(i.created_at))/86400000);return d>=14&&d<28;});
+    if(stale28.length>0)list.push({id:"stale28",type:"danger",msg:`${stale28.length} listing${stale28.length!==1?"s":""} have been unsold for 28+ days. Consider repricing or relisting.`});
+    else if(stale14.length>0)list.push({id:"stale14",type:"warning",msg:`${stale14.length} listing${stale14.length!==1?"s":""} have been unsold for 14+ days. Worth checking your prices.`});
     setAlerts(list);
-  },[inv,exp,bizId]);
+  },[inv,exp,tgts,bizId]);
   return[alerts,id=>setAlerts(a=>a.filter(x=>x.id!==id))];
 }
 const NAV=[
@@ -272,7 +281,7 @@ function Shell({onOut}){
   const[editSku,setEditSku]=useState("");
   const[addForm,setAddForm]=useState({sku:"",title:"",cost:"",price:"",note:"",platform:"eBay",category:"Clothing",location:""});
   const[expForm,setExpForm]=useState({date:"",amount:"",description:"",category:"Stock",due_date:"",recurring:false});
-  const[alerts,dismissAlert]=useAlerts(inv,exp,biz?.id);
+  const[alerts,dismissAlert]=useAlerts(inv,exp,tgts,biz?.id);
   const loadBiz=useCallback(async()=>{
     const{data}=await supabase.from("businesses").select("*").order("created_at");
     if(data){setBizList(data);setBiz(b=>b?data.find(d=>d.id===b.id)||data[0]||null:data[0]||null);}setLoading(false);
@@ -338,10 +347,10 @@ function Shell({onOut}){
         <span style={{fontSize:15,fontWeight:900,color:C.text}}>SELLR<span style={{color:C.accent}}>BASE</span></span>
         <div style={{width:28}}/>
       </div>
-      {alerts.length>0&&<div style={{padding:"12px 24px 0"}}>{alerts.map(a=><AlertBox key={a.id} type={a.type} ch={a.msg} onClose={()=>dismissAlert(a.id)}/>)}</div>}
+
       <div style={{padding:"28px 24px",maxWidth:980,margin:"0 auto"}} className="fade" key={page}>
         {loading&&page!=="settings"?<Spin/>:<>
-          {page==="dashboard"&&<Dashboard {...pp}/>}
+          {page==="dashboard"&&<Dashboard {...pp} alerts={alerts} dismissAlert={dismissAlert}/>}
           {page==="quick"&&<QuickSale {...pp}/>}
           {page==="inventory"&&<Inventory {...pp}/>}
           {page==="add"&&<AddStock {...pp}/>}
@@ -369,63 +378,188 @@ function Shell({onOut}){
     }/>}
   </div>;
 }
-function Dashboard({inv,exp,tgts,biz,navEdit}){
+function ItemModal({item,onClose}){
+  const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;
+  const daysToSell=item.sold&&item.sold_at&&item.created_at?Math.max(0,Math.floor((new Date(item.sold_at)-new Date(item.created_at))/86400000)):null;
+  const rows=[
+    {l:"SKU",v:item.sku||"—"},
+    {l:"Title",v:item.title},
+    {l:"Date Listed",v:item.created_at?new Date(item.created_at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"—"},
+    {l:"Cost Price",v:item.cost!=null?fmt(item.cost):"—"},
+    {l:"List Price",v:fmt(item.price)},
+    {l:"Sold Date",v:item.sold_at?new Date(item.sold_at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"Not sold"},
+    {l:"Sold Price",v:item.sold&&item.sold_price?fmt(item.sold_price):"—"},
+    {l:"Profit",v:profit!=null?fmt(profit):"—",color:profit!=null?(profit>=0?C.green:C.red):C.text3},
+    {l:"Days to Sell",v:daysToSell!=null?`${daysToSell} days`:"—"},
+    {l:"Platform",v:item.platform||"—"},
+    {l:"Category",v:item.category||"—"},
+    {l:"Location",v:item.location||"—"},
+  ];
+  return<Modal title={item.title} onClose={onClose} ch={<>
+    <div style={{display:"flex",gap:8,marginBottom:16}}>
+      <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:item.sold?C.greenL:C.goldL,color:item.sold?C.green:C.gold}}>{item.sold?"SOLD":"LISTED"}</span>
+      {item.sku&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{item.sku}</span>}
+    </div>
+    {rows.map(r=><div key={r.l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+      <span style={{fontSize:12,color:C.text3}}>{r.l}</span>
+      <span style={{fontSize:13,fontWeight:600,color:r.color||C.text,maxWidth:240,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.v}</span>
+    </div>)}
+  </>}/>;
+}
+function DashCalendar({inv,exp}){
+  const[cur,setCur]=useState(new Date());
+  const[expand,setExpand]=useState(null);
+  const[selectedItem,setSelectedItem]=useState(null);
+  const yr=cur.getFullYear(),mo=cur.getMonth();
+  const dim=new Date(yr,mo+1,0).getDate();
+  const firstDay=new Date(yr,mo,1).getDay();
+  const listedMap={},soldMap={};
+  inv.forEach(i=>{
+    if(i.created_at){const d=i.created_at.slice(0,10);if(!listedMap[d])listedMap[d]=[];listedMap[d].push(i);}
+    if(i.sold&&i.sold_at){if(!soldMap[i.sold_at])soldMap[i.sold_at]=[];soldMap[i.sold_at].push(i);}
+  });
+  const cells=[];for(let i=0;i<(firstDay===0?6:firstDay-1);i++)cells.push(null);for(let d=1;d<=dim;d++)cells.push(d);
+  const todayStr=today();
+  return<Card ch={<>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>Calendar</div>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={()=>setCur(new Date(yr,mo-1,1))} style={{background:"none",border:"none",cursor:"pointer",color:C.text2,fontSize:16,padding:"0 4px"}}>‹</button>
+        <span style={{fontSize:13,fontWeight:700,color:C.text}}>{cur.toLocaleString("en-GB",{month:"long",year:"numeric"})}</span>
+        <button onClick={()=>setCur(new Date(yr,mo+1,1))} style={{background:"none",border:"none",cursor:"pointer",color:C.text2,fontSize:16,padding:"0 4px"}}>›</button>
+      </div>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+      {["M","T","W","T","F","S","S"].map((d,i)=><div key={i} style={{textAlign:"center",fontSize:9,fontWeight:700,color:C.text3,padding:"4px 0"}}>{d}</div>)}
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+      {cells.map((day,i)=>{
+        if(!day)return<div key={i}/>;
+        const ds=`${yr}-${String(mo+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+        const listed=(listedMap[ds]||[]).length;
+        const sold=(soldMap[ds]||[]).length;
+        const isToday=ds===todayStr;
+        return<div key={i} style={{minHeight:52,padding:"4px 3px",borderRadius:8,background:isToday?C.accentL:"rgba(255,255,255,0.02)",border:`1px solid ${isToday?C.accentB:C.border}`}}>
+          <div style={{fontSize:10,fontWeight:isToday?800:400,color:isToday?C.accent:C.text3,textAlign:"center",marginBottom:3}}>{day}</div>
+          {listed>0&&<div onClick={()=>setExpand({ds,type:"listed",items:listedMap[ds]})} style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:C.goldL,color:C.gold,fontWeight:700,cursor:"pointer",textAlign:"center",marginBottom:2}}>{listed} listed</div>}
+          {sold>0&&<div onClick={()=>setExpand({ds,type:"sold",items:soldMap[ds]})} style={{fontSize:8,padding:"1px 4px",borderRadius:3,background:C.greenL,color:C.green,fontWeight:700,cursor:"pointer",textAlign:"center"}}>{sold} sold</div>}
+        </div>;
+      })}
+    </div>
+    {expand&&<>
+      <div onClick={()=>setExpand(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:299,backdropFilter:"blur(4px)"}}/>
+      <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:"92%",maxWidth:400,background:C.card,border:`1px solid ${C.border2}`,borderRadius:18,padding:"22px",zIndex:300,maxHeight:"80vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.text}}>{expand.type==="sold"?"Sold":"Listed"} on {new Date(expand.ds+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div>
+          <button onClick={()=>setExpand(null)} style={{background:"none",border:"none",cursor:"pointer",color:C.text2,fontSize:20}}>×</button>
+        </div>
+        {expand.items.map((item,i)=><div key={i} onClick={()=>{setSelectedItem(item);setExpand(null);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:C.card2,borderRadius:10,marginBottom:8,cursor:"pointer"}}>
+          <div style={{overflow:"hidden"}}>
+            {item.sku&&<div style={{fontSize:10,fontWeight:700,color:C.gold,marginBottom:2}}>{item.sku}</div>}
+            <div style={{fontSize:13,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:240}}>{item.title}</div>
+          </div>
+          <div style={{fontSize:13,fontWeight:700,color:C.green,flexShrink:0,marginLeft:8}}>{fmt(item.sold_price||item.price)}</div>
+        </div>)}
+      </div>
+    </>}
+    {selectedItem&&<ItemModal item={selectedItem} onClose={()=>setSelectedItem(null)}/>}
+  </>}/>;
+}
+function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
   const now=new Date();
   const todayStr=today();
   const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
   const soldAll=inv.filter(i=>i.sold);
   const listed=inv.filter(i=>!i.sold);
   const todaySales=soldAll.filter(i=>getSaleDate(i)===todayStr);
+  const todayListed=inv.filter(i=>i.created_at&&i.created_at.slice(0,10)===todayStr);
+  const todayExp=exp.filter(e=>e.date===todayStr);
   const monthSales=soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=monthStart);
   const todayRev=r2(todaySales.reduce((s,i)=>s+(i.sold_price||i.price),0));
   const monthRev=r2(monthSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
   const monthCosts=r2(monthSales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
+  const totalExp=r2(exp.reduce((s,e)=>s+e.amount,0));
   const monthExp=r2(exp.filter(e=>e.date&&new Date(e.date)>=monthStart).reduce((s,e)=>s+e.amount,0));
   const monthProfit=r2(monthRev-monthCosts-monthExp);
-  const monthTarget=tgts.find(t=>t.period==="monthly");
-  const recent=soldAll.filter(i=>getSaleDate(i)).sort((a,b)=>new Date(getSaleDate(b))-new Date(getSaleDate(a))).slice(0,8);
   const dayName=now.toLocaleDateString("en-GB",{weekday:"long"});
   const dateStr=now.toLocaleDateString("en-GB",{day:"numeric",month:"long"});
+  // Targets
+  const monthRevTarget=tgts.find(t=>t.period==="monthly"&&t.target_revenue);
+  const monthItemTarget=tgts.find(t=>t.period==="monthly"&&t.target_items);
+  const yearStart=new Date(now.getFullYear(),0,1);
+  const yearSales=soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=yearStart);
+  const yearRev=r2(yearSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
+  const yearRevTarget=tgts.find(t=>t.period==="yearly"&&t.target_revenue);
+  const yearItemTarget=tgts.find(t=>t.period==="yearly"&&t.target_items);
   return<div>
+    {/* Header */}
     <div style={{marginBottom:20}}>
       <div style={{fontSize:11,color:C.text3,textTransform:"uppercase",letterSpacing:"0.14em",marginBottom:4}}>SELLRBASE</div>
       <h1 style={{fontSize:"clamp(20px,3vw,26px)",fontWeight:800,color:C.text}}>{dayName}, {dateStr}</h1>
       <div style={{fontSize:13,color:C.text2,marginTop:3}}>{biz?.name}</div>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+    {/* Alerts */}
+    {alerts.length>0&&<div style={{marginBottom:16}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Notifications</div>
+      {alerts.map(a=><AlertBox key={a.id} type={a.type} ch={a.msg} onClose={()=>dismissAlert(a.id)}/>)}
+    </div>}
+    {/* Daily snapshot */}
+    <div style={{marginBottom:8}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Today at a Glance</div>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+      <StatCard icon="🏷️" label="Listed Today" value={todayListed.length} color={C.gold}/>
+      <StatCard icon="✅" label="Sold Today" value={todaySales.length} color={C.green}/>
+      <StatCard icon="🧾" label="Expenses Today" value={todayExp.length} color={C.purple}/>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+      <StatCard icon="💰" label="Total Revenue" value={fmt(monthRev)} color={C.accent}/>
+      <StatCard icon="💹" label="Total Profit" value={fmt(monthProfit)} color={C.green}/>
+      <StatCard icon="💸" label="Total Expenses" value={fmt(totalExp)} color={C.red}/>
+    </div>
+    {/* Today hero */}
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
       <div style={{background:`linear-gradient(135deg,${C.accentL},transparent)`,border:`1px solid ${C.accentB}`,borderRadius:14,padding:"18px"}}>
         <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>Today's Revenue</div>
-        <div style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:900,color:C.accent,lineHeight:1}}>{fmt(todayRev)}</div>
-        <div style={{fontSize:12,color:C.text3,marginTop:4}}>{todaySales.length} sale{todaySales.length!==1?"s":""} today</div>
+        <div style={{fontSize:"clamp(22px,4vw,34px)",fontWeight:900,color:C.accent,lineHeight:1}}>{fmt(todayRev)}</div>
+        <div style={{fontSize:12,color:C.text3,marginTop:4}}>{todaySales.length} sale{todaySales.length!==1?"s":""}</div>
       </div>
-      <div style={{background:`linear-gradient(135deg,rgba(16,185,129,0.1),transparent)`,border:"1px solid rgba(16,185,129,0.25)",borderRadius:14,padding:"18px"}}>
+      <div style={{background:"linear-gradient(135deg,rgba(16,185,129,0.1),transparent)",border:"1px solid rgba(16,185,129,0.25)",borderRadius:14,padding:"18px"}}>
         <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>This Month</div>
-        <div style={{fontSize:"clamp(24px,4vw,36px)",fontWeight:900,color:C.green,lineHeight:1}}>{fmt(monthRev)}</div>
+        <div style={{fontSize:"clamp(22px,4vw,34px)",fontWeight:900,color:C.green,lineHeight:1}}>{fmt(monthRev)}</div>
         <div style={{fontSize:12,color:C.text3,marginTop:4}}>{monthSales.length} sale{monthSales.length!==1?"s":""} · {fmt(monthProfit)} profit</div>
       </div>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
-      <StatCard icon="🏷️" label="Listed" value={listed.length} color={C.gold}/>
-      <StatCard icon="💰" label="Stock Value" value={fmt(listed.reduce((s,i)=>s+i.price,0))} color={C.blue}/>
-      <StatCard icon="🧾" label="Month Expenses" value={fmt(monthExp)} color={C.red}/>
-    </div>
-    {monthTarget&&monthTarget.target_revenue&&<Card ch={<>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <span style={{fontSize:12,fontWeight:700,color:C.text2,textTransform:"uppercase",letterSpacing:"0.07em"}}>Monthly Target</span>
-        <span style={{fontSize:13,fontWeight:700,color:C.accent}}>{fmt(monthRev)} / {fmt(monthTarget.target_revenue)}</span>
+    {/* Targets */}
+    {(monthRevTarget||monthItemTarget||yearRevTarget||yearItemTarget)&&<Card ch={<>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Targets</div>
+      {monthRevTarget&&<div style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Monthly Revenue</span><span style={{color:C.text,fontWeight:700}}>{fmt(monthRev)} / {fmt(monthRevTarget.target_revenue)} ({pct(monthRev,monthRevTarget.target_revenue)}%)</span></div>
+        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(monthRev,monthRevTarget.target_revenue),100)}%`,background:`linear-gradient(90deg,${C.accent}88,${C.accent})`,borderRadius:4,transition:"width 0.5s"}}/></div>
+      </div>}
+      {monthItemTarget&&<div style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Monthly Sales</span><span style={{color:C.text,fontWeight:700}}>{monthSales.length} / {monthItemTarget.target_items} ({pct(monthSales.length,monthItemTarget.target_items)}%)</span></div>
+        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(monthSales.length,monthItemTarget.target_items),100)}%`,background:`linear-gradient(90deg,${C.purple}88,${C.purple})`,borderRadius:4,transition:"width 0.5s"}}/></div>
+      </div>}
+      {yearRevTarget&&<div style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Yearly Revenue</span><span style={{color:C.text,fontWeight:700}}>{fmt(yearRev)} / {fmt(yearRevTarget.target_revenue)} ({pct(yearRev,yearRevTarget.target_revenue)}%)</span></div>
+        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(yearRev,yearRevTarget.target_revenue),100)}%`,background:`linear-gradient(90deg,${C.teal}88,${C.teal})`,borderRadius:4,transition:"width 0.5s"}}/></div>
+      </div>}
+      {yearItemTarget&&<div>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Yearly Sales</span><span style={{color:C.text,fontWeight:700}}>{yearSales.length} / {yearItemTarget.target_items} ({pct(yearSales.length,yearItemTarget.target_items)}%)</span></div>
+        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(yearSales.length,yearItemTarget.target_items),100)}%`,background:`linear-gradient(90deg,${C.gold}88,${C.gold})`,borderRadius:4,transition:"width 0.5s"}}/></div>
+      </div>}
+    </>} style={{marginBottom:20}}/>}
+    {/* Calendar */}
+    <div style={{marginBottom:20}}><DashCalendar inv={inv} exp={exp}/></div>
+    {/* In stock */}
+    <Card ch={<>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Stock Overview</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><div style={{fontSize:22,fontWeight:900,color:C.gold}}>{listed.length}</div><div style={{fontSize:11,color:C.text3}}>items listed</div></div>
+        <div><div style={{fontSize:22,fontWeight:900,color:C.blue}}>{fmt(listed.reduce((s,i)=>s+i.price,0))}</div><div style={{fontSize:11,color:C.text3}}>stock value</div></div>
       </div>
-      <div style={{height:8,background:"rgba(255,255,255,0.05)",borderRadius:4,overflow:"hidden"}}>
-        <div style={{height:"100%",width:`${Math.min(pct(monthRev,monthTarget.target_revenue),100)}%`,background:`linear-gradient(90deg,${C.accent}88,${C.accent})`,borderRadius:4,transition:"width 0.5s"}}/>
-      </div>
-      <div style={{fontSize:11,color:C.text3,marginTop:5}}>{pct(monthRev,monthTarget.target_revenue)}% of target</div>
-    </>} style={{marginBottom:16}}/>}
-    {recent.length>0&&<Card ch={<>
-      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Recent Sales</div>
-      {recent.map(i=><div key={i.id} onClick={()=>navEdit(i.sku||i.title)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 0",borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
-        <div><div style={{fontSize:13,fontWeight:600,color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.title}</div><div style={{fontSize:11,color:C.text3,marginTop:2}}>{i.sku&&`${i.sku} · `}{getSaleDate(i)}{i.platform&&` · ${i.platform}`}</div></div>
-        <div style={{textAlign:"right",marginLeft:12,flexShrink:0}}><div style={{fontSize:14,fontWeight:700,color:C.green}}>{fmt(i.sold_price||i.price)}</div>{i.cost&&<div style={{fontSize:11,color:C.text3}}>cost {fmt(i.cost)}</div>}</div>
-      </div>)}
-    </>}/>}
+    </>} style={{marginBottom:20}}/>
   </div>;
 }
 function QuickSale({inv,biz,reload}){

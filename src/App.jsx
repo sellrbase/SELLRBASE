@@ -506,15 +506,20 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
       <div style={{fontSize:13,color:C.text2,marginTop:3}}>{biz?.name}</div>
     </div>
     {/* Notifications */}
-    {alerts.length>0&&<Card ch={<>
+    <Card ch={<>
       <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Notifications</div>
-      {alerts.map(a=><AlertBox key={a.id} type={a.type} ch={a.msg} onClose={()=>dismissAlert(a.id)}/>)}
-    </>} style={{marginBottom:20}}/>}
+      {alerts.length===0
+        ?<div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0"}}>
+            <span style={{fontSize:16}}>✅</span>
+            <span style={{fontSize:13,color:C.text2}}>Nothing to flag right now — you're all good.</span>
+          </div>
+        :alerts.map(a=><AlertBox key={a.id} type={a.type} ch={a.msg} onClose={()=>dismissAlert(a.id)}/>)}
+    </>} style={{marginBottom:20}}/>
     {/* Daily stats — today only */}
     <Card ch={<>
       <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Today</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:14}}>
-        {[["🏷️","Listed",todayListed.length,C.gold],["✅","Sold",todaySales.length,C.green],["🧾","Expenses",todayExp.length,C.purple]].map(([ic,l,v,c])=>(
+        {(()=>{const best=todaySales.length?Math.max(...todaySales.map(i=>i.sold_price||i.price)):0;return[["🏷️","Listed",todayListed.length,C.gold],["✅","Sold",todaySales.length,C.green],["🏆","Best Sale",best>0?fmt(best):"—",C.gold]];})().map(([ic,l,v,c])=>(
           <div key={l} style={{textAlign:"center"}}>
             <div style={{fontSize:20,marginBottom:4}}>{ic}</div>
             <div style={{fontSize:22,fontWeight:800,color:c,lineHeight:1}}>{v}</div>
@@ -536,10 +541,16 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
     {/* Targets */}
     <Card ch={<>
       <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:16}}>Monthly Targets</div>
-      <TRow label="Revenue" value={monthRev} target={monthRevTarget?.target_revenue} color={C.accent}/>
-      <TRow label="Profit" value={monthProfit} target={monthProfitTarget?.target_revenue} color={C.green}/>
-      <TRow label="Sales" value={monthSales.length} target={monthItemTarget?.target_items} color={C.purple}/>
-      <TRow label="Listed" value={listed.length} target={null} color={C.gold}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+        <div>
+          <TRow label="Sales" value={monthSales.length} target={monthItemTarget?.target_items} color={C.purple}/>
+          <TRow label="Listed" value={listed.length} target={null} color={C.gold}/>
+        </div>
+        <div>
+          <TRow label="Revenue" value={monthRev} target={monthRevTarget?.target_revenue} color={C.accent}/>
+          <TRow label="Profit" value={monthProfit} target={null} color={C.green}/>
+        </div>
+      </div>
       {!monthRevTarget&&!monthItemTarget&&<div style={{fontSize:12,color:C.text3,textAlign:"center",padding:"8px 0"}}>No targets set yet — add them in the Targets page.</div>}
     </>} style={{marginBottom:20}}/>
     {/* Calendar */}

@@ -211,14 +211,14 @@ function CreateBizForm({onDone,onOut,compact=false}){
 function Shell({onOut}){
   const[page,setPage]=useState("dashboard");const[bizList,setBizList]=useState([]);const[biz,setBiz]=useState(null);
   const[inv,setInv]=useState([]);const[exp,setExp]=useState([]);const[cal,setCal]=useState([]);const[tgts,setTgts]=useState([]);
-  const[loading,setLoading]=useState(true);const[sideOpen,setSideOpen]=useState(false);const[showBizSwitcher,setShowBizSwitcher]=useState(false);
+  const[loading,setLoading]=useState(false);const[sideOpen,setSideOpen]=useState(false);const[showBizSwitcher,setShowBizSwitcher]=useState(false);
   const[editSku,setEditSku]=useState("");
   const[addForm,setAddForm]=useState({sku:"",title:"",cost:"",price:"",note:"",platform:"eBay",category:"Clothing",location:""});
   const[expForm,setExpForm]=useState({date:"",amount:"",description:"",category:"Stock",due_date:"",recurring:false});
   const[alerts,dismissAlert]=useAlerts(inv,exp,biz?.id);
   const loadBiz=useCallback(async()=>{
     const{data}=await supabase.from("businesses").select("*").order("created_at");
-    if(data){setBizList(data);setBiz(b=>b?data.find(d=>d.id===b.id)||data[0]||null:data[0]||null);}
+    if(data){setBizList(data);setBiz(b=>b?data.find(d=>d.id===b.id)||data[0]||null:data[0]||null);}setLoading(false);
   },[]);
   const loadData=useCallback(async(id)=>{
     if(!id)return;setLoading(true);

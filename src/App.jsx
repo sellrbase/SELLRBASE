@@ -160,7 +160,7 @@ function Auth({mode,onBack,onSwitch}){
     if(mode==="signup"){
       if(!name.trim()){setErr("Please enter your name.");setBusy(false);return;}
       const{error}=await supabase.auth.signUp({email,password:pass,options:{data:{full_name:name}}});
-      if(error)setErr(error.message);else setDone(true);
+      if(error)setErr(error.message);else{await supabase.auth.signInWithPassword({email,password:pass});}
     }else{
       const{error}=await supabase.auth.signInWithPassword({email,password:pass});
       if(error)setErr("Invalid email or password.");
@@ -176,8 +176,7 @@ function Auth({mode,onBack,onSwitch}){
         <h1 style={{fontSize:32,fontWeight:900,color:C.text,letterSpacing:"-0.03em"}}>SELLR<span style={{color:C.accent}}>BASE</span></h1>
         <p style={{fontSize:13,color:C.text2,marginTop:6}}>{mode==="login"?"Welcome back":"Create your free account"}</p>
       </div>
-      <Card ch={done?<><AlertBox type="success" ch="Check your email to confirm, then sign in."/><Btn ch="Go to Sign In" onClick={onSwitch} full style={{marginTop:14}}/></>:
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
           {mode==="signup"&&<Input label="Your Name" req placeholder="e.g. Tyler" value={name} onChange={e=>setName(e.target.value)}/>}
           <Input label="Email" req type="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>
           <Input label="Password" req type="password" placeholder={mode==="signup"?"Min 6 characters":"Password"} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()}/>

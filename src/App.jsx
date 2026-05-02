@@ -486,9 +486,10 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
   const monthExp=r2(exp.filter(e=>e.date&&new Date(e.date)>=monthStart).reduce((s,e)=>s+e.amount,0));
   const monthProfit=r2(monthRev-monthCosts-monthExp);
   // Targets
-  const monthRevTarget=tgts.find(t=>t.period==="monthly"&&t.target_revenue);
-  const monthProfitTarget=tgts.find(t=>t.period==="monthly"&&t.label&&t.label.toLowerCase().includes("profit")&&t.target_revenue);
-  const monthItemTarget=tgts.find(t=>t.period==="monthly"&&t.target_items);
+  const monthRevTarget=tgts.find(t=>t.period==="monthly"&&t.label==="revenue");
+  const monthProfitTarget=tgts.find(t=>t.period==="monthly"&&t.label==="profit");
+  const monthItemTarget=tgts.find(t=>t.period==="monthly"&&t.label==="sold");
+  const monthListedTarget=tgts.find(t=>t.period==="monthly"&&t.label==="listed");
   const dayName=now.toLocaleDateString("en-GB",{weekday:"long"});
   const dateStr=now.toLocaleDateString("en-GB",{day:"numeric",month:"long"});
   const TRow=({label,value,target,color,isMoney=false})=>{
@@ -553,14 +554,14 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
         <div>
           <TRow label="Sales" value={monthSales.length} target={monthItemTarget?.target_items} color={C.purple}/>
-          <TRow label="Listed" value={listed.length} target={null} color={C.gold}/>
+          <TRow label="Listed" value={listed.length} target={monthListedTarget?.target_items} color={C.gold}/>
         </div>
         <div>
           <TRow label="Revenue" value={monthRev} target={monthRevTarget?.target_revenue} color={C.accent} isMoney/>
-          <TRow label="Profit" value={monthProfit} target={null} color={C.green} isMoney/>
+          <TRow label="Profit" value={monthProfit} target={monthProfitTarget?.target_revenue} color={C.green} isMoney/>
         </div>
       </div>
-      {!monthRevTarget&&!monthItemTarget&&<div style={{fontSize:12,color:C.text3,textAlign:"center",padding:"8px 0"}}>No targets set yet — add them in the Targets page.</div>}
+      {!monthRevTarget&&!monthItemTarget&&!monthProfitTarget&&!monthListedTarget&&<div style={{fontSize:12,color:C.text3,textAlign:"center",padding:"8px 0"}}>No targets set yet — add them in the Targets page.</div>}
     </>} style={{marginBottom:20}}/>
     {/* Calendar */}
     <DashCalendar inv={inv} exp={exp}/>
@@ -1096,23 +1097,19 @@ function TaxSummary({inv,exp}){
   </div>;
 }
 function Targets({inv,exp,tgts,biz,reload}){
-  const[period,setPeriod]=useState("monthly");
   const[editing,setEditing]=useState(null);
   const[vals,setVals]=useState({revenue:"",profit:"",sold:"",listed:""});
   const[busy,setBusy]=useState(false);
   const now=new Date();
-  const weekStart=new Date(now);weekStart.setDate(now.getDate()-((now.getDay()+6)%7));weekStart.setHours(0,0,0,0);
   const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
-  const start=period==="weekly"?weekStart:monthStart;
   const soldAll=inv.filter(i=>i.sold&&getSaleDate(i));
-  const periodSales=soldAll.filter(i=>new Date(getSaleDate(i))>=start);
+  const periodSales=soldAll.filter(i=>new Date(getSaleDate(i))>=monthStart);
   const periodRev=r2(periodSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
   const periodCosts=r2(periodSales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
-  const periodExp=r2(exp.filter(e=>e.date&&new Date(e.date)>=start).reduce((s,e)=>s+e.amount,0));
+  const periodExp=r2(exp.filter(e=>e.date&&new Date(e.date)>=monthStart).reduce((s,e)=>s+e.amount,0));
   const periodProfit=r2(periodRev-periodCosts-periodExp);
-  const periodListed=inv.filter(i=>i.created_at&&new Date(i.created_at)>=start).length;
-  // Find saved targets for current period
-  const getT=type=>tgts.find(t=>t.period===period&&t.label===type);
+  const periodListed=inv.filter(i=>i.created_at&&new Date(i.created_at)>=monthStart).length;
+  const getT=type=>tgts.find(t=>t.period==="monthly"&&t.label===type);
   const openEdit=type=>{
     const t=getT(type);
     setVals({revenue:t?.target_revenue||"",profit:"",sold:t?.target_items||"",listed:""});
@@ -1121,7 +1118,7 @@ function Targets({inv,exp,tgts,biz,reload}){
   const saveTarget=async()=>{
     if(!editing)return;setBusy(true);
     const existing=getT(editing);
-    const payload={business_id:biz.id,label:editing,period,
+    const payload={business_id:biz.id,label:editing,period:"monthly",
       target_revenue:["revenue","profit"].includes(editing)&&vals.revenue?r2(parseFloat(vals.revenue)):null,
       target_items:["sold","listed"].includes(editing)&&vals.sold?parseInt(vals.sold):null};
     if(existing)await supabase.from("targets").update(payload).eq("id",existing.id);
@@ -1158,11 +1155,7 @@ function Targets({inv,exp,tgts,biz,reload}){
   };
   return<div>
     <PageHdr title="Targets" sub="INSIGHTS"/>
-    <div style={{display:"flex",gap:8,marginBottom:20}}>
-      {[["weekly","Weekly"],["monthly","Monthly"]].map(([id,l])=>(
-        <button key={id} onClick={()=>setPeriod(id)} style={{padding:"7px 20px",borderRadius:20,border:`1.5px solid ${period===id?C.accent:C.border2}`,background:period===id?C.accentL:"transparent",color:period===id?C.accent:C.text2,fontWeight:period===id?700:400,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
-      ))}
-    </div>
+
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
       <TargetBox type="revenue" label="Revenue" icon="💰" current={periodRev} color={C.accent} isMoney/>
       <TargetBox type="profit" label="Profit" icon="💹" current={periodProfit} color={C.green} isMoney/>

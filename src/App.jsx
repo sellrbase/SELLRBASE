@@ -491,13 +491,22 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
   const monthItemTarget=tgts.find(t=>t.period==="monthly"&&t.target_items);
   const dayName=now.toLocaleDateString("en-GB",{weekday:"long"});
   const dateStr=now.toLocaleDateString("en-GB",{day:"numeric",month:"long"});
-  const TRow=({label,value,target,color})=><div style={{marginBottom:16}}>
-    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}>
-      <span style={{color:C.text2}}>{label}</span>
-      <span style={{color:C.text,fontWeight:700}}>{value} {target&&<span style={{color:C.text3}}>/ {target} ({typeof value==="number"?pct(value,parseFloat(target)):0}%)</span>}</span>
-    </div>
-    {target&&<div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(typeof value==="number"?pct(value,parseFloat(target)):0,100)}%`,background:`linear-gradient(90deg,${color}88,${color})`,borderRadius:4,transition:"width 0.5s"}}/></div>}
-  </div>;
+  const TRow=({label,value,target,color,isMoney=false})=>{
+    const display=isMoney?fmt(value):value;
+    const targetDisplay=isMoney?fmt(parseFloat(target)):target;
+    const p=target?Math.min(pct(isMoney?value:value,parseFloat(target)),100):0;
+    return<div style={{marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+        <span style={{fontSize:12,color:C.text2}}>{label}</span>
+        <div style={{textAlign:"right"}}>
+          {target
+            ?<><span style={{fontSize:13,fontWeight:700,color}}>{p}%</span><span style={{fontSize:11,color:C.text3,marginLeft:6}}>{display} / {targetDisplay}</span></>
+            :<span style={{fontSize:13,fontWeight:700,color}}>{display}</span>}
+        </div>
+      </div>
+      {target&&<div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${p}%`,background:`linear-gradient(90deg,${color}88,${color})`,borderRadius:4,transition:"width 0.5s"}}/></div>}
+    </div>;
+  };
   return<div>
     {/* Header */}
     <div style={{marginBottom:20}}>
@@ -547,8 +556,8 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
           <TRow label="Listed" value={listed.length} target={null} color={C.gold}/>
         </div>
         <div>
-          <TRow label="Revenue" value={monthRev} target={monthRevTarget?.target_revenue} color={C.accent}/>
-          <TRow label="Profit" value={monthProfit} target={null} color={C.green}/>
+          <TRow label="Revenue" value={monthRev} target={monthRevTarget?.target_revenue} color={C.accent} isMoney/>
+          <TRow label="Profit" value={monthProfit} target={null} color={C.green} isMoney/>
         </div>
       </div>
       {!monthRevTarget&&!monthItemTarget&&<div style={{fontSize:12,color:C.text3,textAlign:"center",padding:"8px 0"}}>No targets set yet — add them in the Targets page.</div>}
@@ -1087,55 +1096,91 @@ function TaxSummary({inv,exp}){
   </div>;
 }
 function Targets({inv,exp,tgts,biz,reload}){
-  const[showAdd,setShowAdd]=useState(false);const[label,setLabel]=useState("");const[targetRev,setTargetRev]=useState("");const[targetItems,setTargetItems]=useState("");const[period,setPeriod]=useState("monthly");const[busy,setBusy]=useState(false);
+  const[period,setPeriod]=useState("monthly");
+  const[editing,setEditing]=useState(null);
+  const[vals,setVals]=useState({revenue:"",profit:"",sold:"",listed:""});
+  const[busy,setBusy]=useState(false);
   const now=new Date();
+  const weekStart=new Date(now);weekStart.setDate(now.getDate()-((now.getDay()+6)%7));weekStart.setHours(0,0,0,0);
   const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
-  const yearStart=new Date(now.getFullYear(),0,1);
+  const start=period==="weekly"?weekStart:monthStart;
   const soldAll=inv.filter(i=>i.sold&&getSaleDate(i));
-  const monthSales=soldAll.filter(i=>new Date(getSaleDate(i))>=monthStart);
-  const yearSales=soldAll.filter(i=>new Date(getSaleDate(i))>=yearStart);
-  const monthRev=r2(monthSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
-  const yearRev=r2(yearSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
-  const save=async()=>{
-    if(!label.trim())return;setBusy(true);
-    await supabase.from("targets").insert([{business_id:biz.id,label:label.trim(),target_revenue:targetRev?r2(parseFloat(targetRev)):null,target_items:targetItems?parseInt(targetItems):null,period}]);
-    setLabel("");setTargetRev("");setTargetItems("");setShowAdd(false);reload();setBusy(false);
+  const periodSales=soldAll.filter(i=>new Date(getSaleDate(i))>=start);
+  const periodRev=r2(periodSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
+  const periodCosts=r2(periodSales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
+  const periodExp=r2(exp.filter(e=>e.date&&new Date(e.date)>=start).reduce((s,e)=>s+e.amount,0));
+  const periodProfit=r2(periodRev-periodCosts-periodExp);
+  const periodListed=inv.filter(i=>i.created_at&&new Date(i.created_at)>=start).length;
+  // Find saved targets for current period
+  const getT=type=>tgts.find(t=>t.period===period&&t.label===type);
+  const openEdit=type=>{
+    const t=getT(type);
+    setVals({revenue:t?.target_revenue||"",profit:"",sold:t?.target_items||"",listed:""});
+    setEditing(type);
   };
-  const del=async id=>{await supabase.from("targets").delete().eq("id",id);reload();};
-  const getProgress=t=>{
-    const sales=t.period==="monthly"?monthSales:yearSales;
-    const rev=r2(sales.reduce((s,i)=>s+(i.sold_price||i.price),0));
-    const items=sales.length;
-    return{rev,items,revPct:t.target_revenue?pct(rev,t.target_revenue):null,itemsPct:t.target_items?pct(items,t.target_items):null};
+  const saveTarget=async()=>{
+    if(!editing)return;setBusy(true);
+    const existing=getT(editing);
+    const payload={business_id:biz.id,label:editing,period,
+      target_revenue:["revenue","profit"].includes(editing)&&vals.revenue?r2(parseFloat(vals.revenue)):null,
+      target_items:["sold","listed"].includes(editing)&&vals.sold?parseInt(vals.sold):null};
+    if(existing)await supabase.from("targets").update(payload).eq("id",existing.id);
+    else await supabase.from("targets").insert([payload]);
+    setEditing(null);reload();setBusy(false);
+  };
+  const TargetBox=({type,label,icon,current,color,isMoney=false})=>{
+    const t=getT(type);
+    const target=t?.target_revenue||t?.target_items||null;
+    const p=target?Math.min(pct(current,parseFloat(target)),100):0;
+    const display=isMoney?fmt(current):current;
+    const targetDisplay=isMoney?fmt(parseFloat(target)):target;
+    return<div onClick={()=>openEdit(type)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",cursor:"pointer",transition:"border-color 0.15s"}}
+      onMouseEnter={e=>e.currentTarget.style.borderColor=color}
+      onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <div>
+          <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>{icon} {label}</div>
+          <div style={{fontSize:26,fontWeight:900,color,lineHeight:1}}>{display}</div>
+        </div>
+        {target&&<div style={{textAlign:"right"}}>
+          <div style={{fontSize:20,fontWeight:800,color}}>{p}%</div>
+          <div style={{fontSize:10,color:C.text3,marginTop:2}}>of target</div>
+        </div>}
+        {!target&&<div style={{fontSize:11,color:C.text3,background:"rgba(255,255,255,0.05)",padding:"4px 10px",borderRadius:20}}>Set target</div>}
+      </div>
+      {target&&<>
+        <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3,overflow:"hidden",marginBottom:6}}>
+          <div style={{height:"100%",width:`${p}%`,background:`linear-gradient(90deg,${color}66,${color})`,borderRadius:3,transition:"width 0.5s"}}/>
+        </div>
+        <div style={{fontSize:11,color:C.text3}}>{display} / {targetDisplay}</div>
+      </>}
+    </div>;
   };
   return<div>
-    <PageHdr title="Targets" sub="INSIGHTS" action={<Btn ch="+ Add Target" onClick={()=>setShowAdd(true)}/>}/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
-      <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>This Month</div><div style={{fontSize:28,fontWeight:900,color:C.accent,marginBottom:4}}>{fmt(monthRev)}</div><div style={{fontSize:12,color:C.text2}}>{monthSales.length} items sold</div></>}/>
-      <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>This Year</div><div style={{fontSize:28,fontWeight:900,color:C.accent,marginBottom:4}}>{fmt(yearRev)}</div><div style={{fontSize:12,color:C.text2}}>{yearSales.length} items sold</div></>}/>
+    <PageHdr title="Targets" sub="INSIGHTS"/>
+    <div style={{display:"flex",gap:8,marginBottom:20}}>
+      {[["weekly","Weekly"],["monthly","Monthly"]].map(([id,l])=>(
+        <button key={id} onClick={()=>setPeriod(id)} style={{padding:"7px 20px",borderRadius:20,border:`1.5px solid ${period===id?C.accent:C.border2}`,background:period===id?C.accentL:"transparent",color:period===id?C.accent:C.text2,fontWeight:period===id?700:400,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
+      ))}
     </div>
-    {tgts.length===0&&!showAdd&&<Card ch={<div style={{textAlign:"center",padding:"32px 0",color:C.text3}}>No targets set yet. Add your first target to track progress.</div>}/>}
-    {tgts.map(t=>{const{rev,items,revPct,itemsPct}=getProgress(t);return<Card key={t.id} ch={<>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-        <div><div style={{fontSize:15,fontWeight:700,color:C.text}}>{t.label}</div><div style={{fontSize:11,color:C.text3,marginTop:3,textTransform:"capitalize"}}>{t.period}</div></div>
-        <Btn ch="×" onClick={()=>del(t.id)} variant="ghost" small/>
-      </div>
-      {t.target_revenue&&<div style={{marginBottom:10}}>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Revenue</span><span style={{color:C.text,fontWeight:600}}>{fmt(rev)} / {fmt(t.target_revenue)} ({revPct}%)</span></div>
-        <div style={{height:8,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(revPct,100)}%`,background:`linear-gradient(90deg,${C.accent}88,${C.accent})`,borderRadius:4,transition:"width 0.5s"}}/></div>
-      </div>}
-      {t.target_items&&<div>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Items</span><span style={{color:C.text,fontWeight:600}}>{items} / {t.target_items} ({itemsPct}%)</span></div>
-        <div style={{height:8,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(itemsPct,100)}%`,background:`linear-gradient(90deg,${C.purple}88,${C.purple})`,borderRadius:4,transition:"width 0.5s"}}/></div>
-      </div>}
-    </>} style={{marginBottom:12}}/>;})}
-    {showAdd&&<Modal title="New Target" onClose={()=>setShowAdd(false)} ch={
-      <div style={{display:"flex",flexDirection:"column",gap:12}}>
-        <Input label="Target Name" req placeholder="e.g. Q2 Revenue Goal" value={label} onChange={e=>setLabel(e.target.value)}/>
-        <Sel label="Period" ch={[["monthly","Monthly"],["yearly","Yearly"]].map(([v,l])=><option key={v} value={v}>{l}</option>)} value={period} onChange={e=>setPeriod(e.target.value)}/>
-        <Input label="Revenue Target (£)" type="number" placeholder="e.g. 2000" value={targetRev} onChange={e=>setTargetRev(e.target.value)}/>
-        <Input label="Items Target" type="number" placeholder="e.g. 50" value={targetItems} onChange={e=>setTargetItems(e.target.value)}/>
-        <div style={{display:"flex",gap:8}}><Btn ch={busy?"Saving…":"Create"} onClick={save} disabled={busy||!label.trim()} full/><Btn ch="Cancel" onClick={()=>setShowAdd(false)} variant="ghost"/></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+      <TargetBox type="revenue" label="Revenue" icon="💰" current={periodRev} color={C.accent} isMoney/>
+      <TargetBox type="profit" label="Profit" icon="💹" current={periodProfit} color={C.green} isMoney/>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+      <TargetBox type="sold" label="Total Sold" icon="✅" current={periodSales.length} color={C.purple}/>
+      <TargetBox type="listed" label="New Listed" icon="🏷️" current={periodListed} color={C.gold}/>
+    </div>
+    {editing&&<Modal title={`Set ${editing.charAt(0).toUpperCase()+editing.slice(1)} Target`} onClose={()=>setEditing(null)} ch={
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{fontSize:13,color:C.text2}}>Set your {period} target for {editing}. Click the box again any time to update it.</div>
+        {["revenue","profit"].includes(editing)
+          ?<Input label={`Target Amount (£)`} req type="number" placeholder="e.g. 500" value={vals.revenue} onChange={e=>setVals(v=>({...v,revenue:e.target.value}))}/>
+          :<Input label={`Target (number of items)`} req type="number" placeholder="e.g. 50" value={vals.sold} onChange={e=>setVals(v=>({...v,sold:e.target.value}))}/>}
+        <div style={{display:"flex",gap:8}}>
+          <Btn ch={busy?"Saving…":"Save Target"} onClick={saveTarget} disabled={busy||(!vals.revenue&&!vals.sold)} full/>
+          <Btn ch="Cancel" onClick={()=>setEditing(null)} variant="ghost"/>
+        </div>
       </div>
     }/>}
   </div>;

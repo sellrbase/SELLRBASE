@@ -471,26 +471,33 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
   const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
   const soldAll=inv.filter(i=>i.sold);
   const listed=inv.filter(i=>!i.sold);
+  // Today only
   const todaySales=soldAll.filter(i=>getSaleDate(i)===todayStr);
   const todayListed=inv.filter(i=>i.created_at&&i.created_at.slice(0,10)===todayStr);
   const todayExp=exp.filter(e=>e.date===todayStr);
-  const monthSales=soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=monthStart);
   const todayRev=r2(todaySales.reduce((s,i)=>s+(i.sold_price||i.price),0));
+  const todayCosts=r2(todaySales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
+  const todayExpTotal=r2(todayExp.reduce((s,e)=>s+e.amount,0));
+  const todayProfit=r2(todayRev-todayCosts-todayExpTotal);
+  // Month for targets
+  const monthSales=soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=monthStart);
   const monthRev=r2(monthSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
   const monthCosts=r2(monthSales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
-  const totalExp=r2(exp.reduce((s,e)=>s+e.amount,0));
   const monthExp=r2(exp.filter(e=>e.date&&new Date(e.date)>=monthStart).reduce((s,e)=>s+e.amount,0));
   const monthProfit=r2(monthRev-monthCosts-monthExp);
-  const dayName=now.toLocaleDateString("en-GB",{weekday:"long"});
-  const dateStr=now.toLocaleDateString("en-GB",{day:"numeric",month:"long"});
   // Targets
   const monthRevTarget=tgts.find(t=>t.period==="monthly"&&t.target_revenue);
+  const monthProfitTarget=tgts.find(t=>t.period==="monthly"&&t.label&&t.label.toLowerCase().includes("profit")&&t.target_revenue);
   const monthItemTarget=tgts.find(t=>t.period==="monthly"&&t.target_items);
-  const yearStart=new Date(now.getFullYear(),0,1);
-  const yearSales=soldAll.filter(i=>getSaleDate(i)&&new Date(getSaleDate(i))>=yearStart);
-  const yearRev=r2(yearSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
-  const yearRevTarget=tgts.find(t=>t.period==="yearly"&&t.target_revenue);
-  const yearItemTarget=tgts.find(t=>t.period==="yearly"&&t.target_items);
+  const dayName=now.toLocaleDateString("en-GB",{weekday:"long"});
+  const dateStr=now.toLocaleDateString("en-GB",{day:"numeric",month:"long"});
+  const TRow=({label,value,target,color})=><div style={{marginBottom:16}}>
+    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}>
+      <span style={{color:C.text2}}>{label}</span>
+      <span style={{color:C.text,fontWeight:700}}>{value} {target&&<span style={{color:C.text3}}>/ {target} ({typeof value==="number"?pct(value,parseFloat(target)):0}%)</span>}</span>
+    </div>
+    {target&&<div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(typeof value==="number"?pct(value,parseFloat(target)):0,100)}%`,background:`linear-gradient(90deg,${color}88,${color})`,borderRadius:4,transition:"width 0.5s"}}/></div>}
+  </div>;
   return<div>
     {/* Header */}
     <div style={{marginBottom:20}}>
@@ -498,68 +505,45 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
       <h1 style={{fontSize:"clamp(20px,3vw,26px)",fontWeight:800,color:C.text}}>{dayName}, {dateStr}</h1>
       <div style={{fontSize:13,color:C.text2,marginTop:3}}>{biz?.name}</div>
     </div>
-    {/* Alerts */}
-    {alerts.length>0&&<div style={{marginBottom:16}}>
-      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Notifications</div>
+    {/* Notifications */}
+    {alerts.length>0&&<Card ch={<>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Notifications</div>
       {alerts.map(a=><AlertBox key={a.id} type={a.type} ch={a.msg} onClose={()=>dismissAlert(a.id)}/>)}
-    </div>}
-    {/* Daily snapshot */}
-    <div style={{marginBottom:8}}>
-      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Today at a Glance</div>
-    </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
-      <StatCard icon="🏷️" label="Listed Today" value={todayListed.length} color={C.gold}/>
-      <StatCard icon="✅" label="Sold Today" value={todaySales.length} color={C.green}/>
-      <StatCard icon="🧾" label="Expenses Today" value={todayExp.length} color={C.purple}/>
-    </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
-      <StatCard icon="💰" label="Total Revenue" value={fmt(monthRev)} color={C.accent}/>
-      <StatCard icon="💹" label="Total Profit" value={fmt(monthProfit)} color={C.green}/>
-      <StatCard icon="💸" label="Total Expenses" value={fmt(totalExp)} color={C.red}/>
-    </div>
-    {/* Today hero */}
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
-      <div style={{background:`linear-gradient(135deg,${C.accentL},transparent)`,border:`1px solid ${C.accentB}`,borderRadius:14,padding:"18px"}}>
-        <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>Today's Revenue</div>
-        <div style={{fontSize:"clamp(22px,4vw,34px)",fontWeight:900,color:C.accent,lineHeight:1}}>{fmt(todayRev)}</div>
-        <div style={{fontSize:12,color:C.text3,marginTop:4}}>{todaySales.length} sale{todaySales.length!==1?"s":""}</div>
-      </div>
-      <div style={{background:"linear-gradient(135deg,rgba(16,185,129,0.1),transparent)",border:"1px solid rgba(16,185,129,0.25)",borderRadius:14,padding:"18px"}}>
-        <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>This Month</div>
-        <div style={{fontSize:"clamp(22px,4vw,34px)",fontWeight:900,color:C.green,lineHeight:1}}>{fmt(monthRev)}</div>
-        <div style={{fontSize:12,color:C.text3,marginTop:4}}>{monthSales.length} sale{monthSales.length!==1?"s":""} · {fmt(monthProfit)} profit</div>
-      </div>
-    </div>
-    {/* Targets */}
-    {(monthRevTarget||monthItemTarget||yearRevTarget||yearItemTarget)&&<Card ch={<>
-      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Targets</div>
-      {monthRevTarget&&<div style={{marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Monthly Revenue</span><span style={{color:C.text,fontWeight:700}}>{fmt(monthRev)} / {fmt(monthRevTarget.target_revenue)} ({pct(monthRev,monthRevTarget.target_revenue)}%)</span></div>
-        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(monthRev,monthRevTarget.target_revenue),100)}%`,background:`linear-gradient(90deg,${C.accent}88,${C.accent})`,borderRadius:4,transition:"width 0.5s"}}/></div>
-      </div>}
-      {monthItemTarget&&<div style={{marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Monthly Sales</span><span style={{color:C.text,fontWeight:700}}>{monthSales.length} / {monthItemTarget.target_items} ({pct(monthSales.length,monthItemTarget.target_items)}%)</span></div>
-        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(monthSales.length,monthItemTarget.target_items),100)}%`,background:`linear-gradient(90deg,${C.purple}88,${C.purple})`,borderRadius:4,transition:"width 0.5s"}}/></div>
-      </div>}
-      {yearRevTarget&&<div style={{marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Yearly Revenue</span><span style={{color:C.text,fontWeight:700}}>{fmt(yearRev)} / {fmt(yearRevTarget.target_revenue)} ({pct(yearRev,yearRevTarget.target_revenue)}%)</span></div>
-        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(yearRev,yearRevTarget.target_revenue),100)}%`,background:`linear-gradient(90deg,${C.teal}88,${C.teal})`,borderRadius:4,transition:"width 0.5s"}}/></div>
-      </div>}
-      {yearItemTarget&&<div>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}><span style={{color:C.text2}}>Yearly Sales</span><span style={{color:C.text,fontWeight:700}}>{yearSales.length} / {yearItemTarget.target_items} ({pct(yearSales.length,yearItemTarget.target_items)}%)</span></div>
-        <div style={{height:7,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(pct(yearSales.length,yearItemTarget.target_items),100)}%`,background:`linear-gradient(90deg,${C.gold}88,${C.gold})`,borderRadius:4,transition:"width 0.5s"}}/></div>
-      </div>}
     </>} style={{marginBottom:20}}/>}
-    {/* Calendar */}
-    <div style={{marginBottom:20}}><DashCalendar inv={inv} exp={exp}/></div>
-    {/* In stock */}
+    {/* Daily stats — today only */}
     <Card ch={<>
-      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Stock Overview</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <div><div style={{fontSize:22,fontWeight:900,color:C.gold}}>{listed.length}</div><div style={{fontSize:11,color:C.text3}}>items listed</div></div>
-        <div><div style={{fontSize:22,fontWeight:900,color:C.blue}}>{fmt(listed.reduce((s,i)=>s+i.price,0))}</div><div style={{fontSize:11,color:C.text3}}>stock value</div></div>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Today</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:14}}>
+        {[["🏷️","Listed",todayListed.length,C.gold],["✅","Sold",todaySales.length,C.green],["🧾","Expenses",todayExp.length,C.purple]].map(([ic,l,v,c])=>(
+          <div key={l} style={{textAlign:"center"}}>
+            <div style={{fontSize:20,marginBottom:4}}>{ic}</div>
+            <div style={{fontSize:22,fontWeight:800,color:c,lineHeight:1}}>{v}</div>
+            <div style={{fontSize:10,color:C.text3,marginTop:3,textTransform:"uppercase",letterSpacing:"0.06em"}}>{l}</div>
+          </div>
+        ))}
+      </div>
+      <Divider/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginTop:14}}>
+        {[["💰","Revenue",fmt(todayRev),C.accent],["💹","Profit",fmt(todayProfit),todayProfit>=0?C.green:C.red],["💸","Expenses",fmt(todayExpTotal),C.red]].map(([ic,l,v,c])=>(
+          <div key={l} style={{textAlign:"center"}}>
+            <div style={{fontSize:20,marginBottom:4}}>{ic}</div>
+            <div style={{fontSize:16,fontWeight:800,color:c,lineHeight:1}}>{v}</div>
+            <div style={{fontSize:10,color:C.text3,marginTop:3,textTransform:"uppercase",letterSpacing:"0.06em"}}>{l}</div>
+          </div>
+        ))}
       </div>
     </>} style={{marginBottom:20}}/>
+    {/* Targets */}
+    <Card ch={<>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:16}}>Monthly Targets</div>
+      <TRow label="Revenue" value={monthRev} target={monthRevTarget?.target_revenue} color={C.accent}/>
+      <TRow label="Profit" value={monthProfit} target={monthProfitTarget?.target_revenue} color={C.green}/>
+      <TRow label="Sales" value={monthSales.length} target={monthItemTarget?.target_items} color={C.purple}/>
+      <TRow label="Listed" value={listed.length} target={null} color={C.gold}/>
+      {!monthRevTarget&&!monthItemTarget&&<div style={{fontSize:12,color:C.text3,textAlign:"center",padding:"8px 0"}}>No targets set yet — add them in the Targets page.</div>}
+    </>} style={{marginBottom:20}}/>
+    {/* Calendar */}
+    <DashCalendar inv={inv} exp={exp}/>
   </div>;
 }
 function QuickSale({inv,biz,reload}){

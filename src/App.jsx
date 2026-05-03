@@ -88,8 +88,8 @@ function useAlerts(inv,exp,tgts,bizId){
     });
     // Stale listings — 28+ days danger, 14+ days warning
     const listed=inv.filter(i=>!i.sold&&i.created_at);
-    const stale28=listed.filter(i=>Math.floor((now-new Date(i.created_at))/86400000)>=28);
-    const stale14=listed.filter(i=>{const d=Math.floor((now-new Date(i.created_at))/86400000);return d>=14&&d<28;});
+    const stale28=listed.filter(i=>Math.floor((now-new Date(i.created_at.replace(" ","T").replace("+00","Z")))/86400000)>=28);
+    const stale14=listed.filter(i=>{const d=Math.floor((now-new Date(i.created_at.replace(" ","T").replace("+00","Z")))/86400000);return d>=14&&d<28;});
     if(stale28.length>0)list.push({id:"stale28",type:"danger",msg:`${stale28.length} listing${stale28.length!==1?"s":""} have been unsold for 28+ days. Consider repricing or relisting.`});
     else if(stale14.length>0)list.push({id:"stale14",type:"warning",msg:`${stale14.length} listing${stale14.length!==1?"s":""} have been unsold for 14+ days. Worth checking your prices.`});
     setAlerts(list);
@@ -102,7 +102,7 @@ const NAV=[
   {id:"add",icon:"➕",label:"Add Stock",group:"ACTIONS"},
   {id:"edit",icon:"✏️",label:"Edit Stock",group:"ACTIONS"},
   {id:"inventory",icon:"📦",label:"Inventory",group:"STOCK"},
-  {id:"comp",icon:"🔎",label:"Comp & Pricing",group:"TOOLS"},
+  {id:"comp",icon:"🔎",label:"Comp Checker",group:"TOOLS"},
   {id:"expenses",icon:"🧾",label:"Expenses",group:"TOOLS"},
   {id:"calendar",icon:"📅",label:"Calendar",group:"TOOLS"},
   {id:"analytics",icon:"📊",label:"Analytics",group:"INSIGHTS"},
@@ -596,7 +596,7 @@ function QuickSale({inv,biz,reload}){
     if(error)setErr(error.message);else{setOk(true);setFound(null);setQ("");setPlatform("eBay");reload();}
     setBusy(false);
   };
-  return<div style={{maxWidth:480,margin:"0 auto"}}>
+  return<div style={{maxWidth:480,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 600px) / 2))"}}>
     <PageHdr title="Mark As Sold" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"flex",gap:10}}>
@@ -647,7 +647,7 @@ function Inventory({inv,reload,navEdit}){
     return 0;
   });
   const sel={...DI,width:"auto",cursor:"pointer",paddingRight:30,appearance:"none",backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='rgba(255,255,255,0.35)' d='M5 7L0 2h10z'/%3E%3C/svg%3E")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 10px center"};
-  const daysListed=item=>{if(!item.created_at)return"—";const end=item.sold&&item.sold_at?new Date(item.sold_at):new Date();return Math.max(0,Math.floor((end-new Date(item.created_at))/86400000))+"D";};
+  const daysListed=item=>{if(!item.created_at)return"—";const start=new Date(item.created_at.replace(" ","T").replace("+00","Z"));const end=item.sold&&item.sold_at?new Date(item.sold_at+"T12:00:00Z"):new Date();const d=Math.max(0,Math.floor((end-start)/86400000));return d===0?"Today":`${d}D`;};
   return<div>
     <PageHdr title="Inventory" sub="STOCK MANAGEMENT"/>
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
@@ -698,7 +698,7 @@ function AddStock({biz,reload,addForm,setAddForm}){
     if(error)setErr(error.message);else{setAddForm({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:""});setOk(true);setTimeout(()=>setOk(false),3000);reload();}
     setBusy(false);
   };
-  return<div style={{maxWidth:560,margin:"0 auto"}}>
+  return<div style={{maxWidth:560,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 620px) / 2))"}}>    
     <PageHdr title="Add Stock" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
       <Input label="Item Title" req placeholder="e.g. Vintage Carhartt Chore Coat" value={addForm.title} onChange={f("title")}/>
@@ -735,7 +735,7 @@ function EditStock({biz,reload,editSku}){
     setBusy(false);
   };
   const del=async()=>{if(!found||!window.confirm("Delete permanently?"))return;await supabase.from("inventory").delete().eq("id",found.id);setFound(null);setEd(null);setQ("");reload();};
-  return<div style={{maxWidth:560,margin:"0 auto"}}>
+  return<div style={{maxWidth:560,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 500px) / 2))"}}>    
     <PageHdr title="Edit Stock" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",gap:10}}>
       <input style={{...DI,flex:1}} placeholder="Search by SKU or title…" value={q} onChange={e=>{setQ(e.target.value);setNf(false);}} onKeyDown={e=>e.key==="Enter"&&doSearch()}/>
@@ -765,57 +765,27 @@ function EditStock({biz,reload,editSku}){
 }
 function CompPricing(){
   const[brand,setBrand]=useState("");const[type,setType]=useState("");const[colour,setColour]=useState("");const[size,setSize]=useState("");
-  const[links,setLinks]=useState(null);const[prices,setPrices]=useState(Array(8).fill(""));const[result,setResult]=useState(null);
+  const[links,setLinks]=useState(null);
   const q=[brand,type,colour,size].filter(Boolean).join(" ").trim();
   const goComp=()=>{if(!q)return;const enc=encodeURIComponent(q);setLinks({ebayS:`https://www.ebay.co.uk/sch/i.html?_nkw=${enc}&LH_Sold=1&LH_Complete=1`,ebayA:`https://www.ebay.co.uk/sch/i.html?_nkw=${enc}`,vinted:`https://www.vinted.co.uk/catalog?search_text=${enc}`,depop:`https://www.depop.com/search/?q=${enc}`});};
-  const vals=prices.map(v=>parseFloat(v)).filter(v=>!isNaN(v)&&v>0);
-  const goCalc=()=>{if(!vals.length)return;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;setResult({avg:Math.floor(avg)+0.99,higher:Math.floor(avg*1.12)+0.99,quick:Math.floor(avg*0.83)+0.99,max:Math.max(...vals),count:vals.length});};
-  return<div>
-    <PageHdr title="Comp & Pricing" sub="TOOLS"/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-      <Card ch={<div style={{display:"flex",flexDirection:"column",gap:12}}>
-        <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Comp Checker</div>
-        <Input label="Brand" req placeholder="e.g. Carhartt" value={brand} onChange={e=>setBrand(e.target.value)}/>
-        <Input label="Item Type" req placeholder="e.g. Chore Coat" value={type} onChange={e=>setType(e.target.value)}/>
+  return<div style={{maxWidth:480,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 520px) / 2))"}}>
+    <PageHdr title="Comp Checker" sub="TOOLS"/>
+    <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <Input label="Brand" req placeholder="e.g. Carhartt" value={brand} onChange={e=>setBrand(e.target.value)}/>
+      <Input label="Item Type" req placeholder="e.g. Chore Coat" value={type} onChange={e=>setType(e.target.value)}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Input label="Colour" placeholder="e.g. Black" value={colour} onChange={e=>setColour(e.target.value)}/>
         <Input label="Size" placeholder="e.g. M" value={size} onChange={e=>setSize(e.target.value)}/>
-        <div style={{display:"flex",gap:8}}><Btn ch="Search" onClick={goComp} disabled={!q} full/><Btn ch="Clear" onClick={()=>{setBrand("");setType("");setColour("");setSize("");setLinks(null);}} variant="ghost"/></div>
-        {links&&<div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
-          {[["🛒","eBay Sold",links.ebayS],["🏷️","eBay Active",links.ebayA],["👗","Vinted",links.vinted],["🛍️","Depop",links.depop]].map(([ic,l,h])=>(
-            <a key={l} href={h} target="_blank" rel="noreferrer" style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:C.accentL,border:`1px solid ${C.accentB}`,borderRadius:10,textDecoration:"none",color:C.accent,fontWeight:600,fontSize:13}}>
-              <span>{ic}</span><span style={{flex:1}}>{l}</span><span>↗</span>
-            </a>
-          ))}
-        </div>}
-      </div>}/>
-      <Card ch={<div style={{display:"flex",flexDirection:"column",gap:12}}>
-        <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Price Calculator</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {prices.map((v,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:5}}>
-            <span style={{fontSize:10,color:C.text3,width:16,flexShrink:0}}>#{i+1}</span>
-            <div style={{position:"relative",flex:1}}>
-              <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:C.text3,fontSize:12,pointerEvents:"none"}}>£</span>
-              <input style={{...DI,paddingLeft:20,fontSize:13}} type="number" placeholder="0.00" value={v} onChange={e=>{const n=[...prices];n[i]=e.target.value;setPrices(n);setResult(null);}}/>
-            </div>
-          </div>)}
-        </div>
-        <div style={{display:"flex",gap:8}}><Btn ch="Calculate" onClick={goCalc} disabled={vals.length===0} full/><Btn ch="Clear" onClick={()=>{setPrices(Array(8).fill(""));setResult(null);}} variant="ghost"/></div>
-        {result&&<>
-          <div style={{textAlign:"center",padding:"16px",background:C.accentL,border:`1px solid ${C.accentB}`,borderRadius:12}}>
-            <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Average ({result.count} comps)</div>
-            <div style={{fontSize:32,fontWeight:900,color:C.accent}}>£{result.avg.toFixed(2)}</div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            {[["Higher",result.higher,C.green],["Quick Sale",result.quick,C.gold],["Max",result.max,C.purple]].map(([l,v,c])=>(
-              <div key={l} style={{padding:"12px 8px",background:C.card2,border:`1px solid ${C.border}`,borderRadius:10,textAlign:"center"}}>
-                <div style={{fontSize:10,color:C.text3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{l}</div>
-                <div style={{fontSize:16,fontWeight:800,color:c}}>£{typeof v==="number"?v.toFixed(2):"—"}</div>
-              </div>
-            ))}
-          </div>
-        </>}
-      </div>}/>
-    </div>
+      </div>
+      <div style={{display:"flex",gap:8}}><Btn ch="Search" onClick={goComp} disabled={!q} full/><Btn ch="Clear" onClick={()=>{setBrand("");setType("");setColour("");setSize("");setLinks(null);}} variant="ghost"/></div>
+      {links&&<div style={{display:"flex",flexDirection:"column",gap:8,marginTop:4}}>
+        {[["🛒","eBay Sold",links.ebayS],["🏷️","eBay Active",links.ebayA],["👗","Vinted",links.vinted],["🛍️","Depop",links.depop]].map(([ic,l,h])=>(
+          <a key={l} href={h} target="_blank" rel="noreferrer" style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:C.accentL,border:`1px solid ${C.accentB}`,borderRadius:12,textDecoration:"none",color:C.accent,fontWeight:600,fontSize:14}}>
+            <span style={{fontSize:18}}>{ic}</span><span style={{flex:1}}>{l}</span><span style={{fontSize:16}}>↗</span>
+          </a>
+        ))}
+      </div>}
+    </div>}/>
   </div>;
 }
 function Expenses({biz,exp,reload,expForm,setExpForm}){
@@ -970,69 +940,152 @@ function Calendar({inv,cal,biz,reload}){
   </div>;
 }
 function Analytics({inv,exp}){
-  const[view,setView]=useState("overview");const now=new Date();
-  const soldAll=inv.filter(i=>i.sold&&getSaleDate(i));
+  const[period,setPeriod]=useState("month");
+  const now=new Date();
   const mn=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const totalRev=r2(soldAll.reduce((s,i)=>s+(i.sold_price||i.price),0));
-  const totalCost=r2(soldAll.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
-  const totalExp=r2(exp.reduce((s,e)=>s+e.amount,0));
-  const totalProfit=r2(totalRev-totalCost-totalExp);
-  const monthlyData=[];
-  for(let i=11;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);const v=soldAll.filter(x=>getSaleDate(x)&&new Date(getSaleDate(x)).getFullYear()===d.getFullYear()&&new Date(getSaleDate(x)).getMonth()===d.getMonth()).reduce((s,x)=>s+(x.sold_price||x.price),0);monthlyData.push({l:mn[d.getMonth()],v:r2(v),hi:i===0,fmt:fmt(r2(v))});}
-  const byCat={};soldAll.forEach(i=>{const c=i.category||"Other";byCat[c]=(byCat[c]||0)+(i.sold_price||i.price);});
-  const catMax=Math.max(...Object.values(byCat),1);
-  const byPlat={};soldAll.forEach(i=>{const p=i.platform||"Other";byPlat[p]=(byPlat[p]||0)+(i.sold_price||i.price);});
+  const getStart=p=>{
+    if(p==="today")return new Date(now.getFullYear(),now.getMonth(),now.getDate());
+    if(p==="week"){const d=new Date(now);d.setDate(d.getDate()-((d.getDay()+6)%7));d.setHours(0,0,0,0);return d;}
+    if(p==="month")return new Date(now.getFullYear(),now.getMonth(),1);
+    if(p==="year")return new Date(now.getFullYear(),0,1);
+    return new Date(0);
+  };
+  const start=getStart(period);
+  const allSold=inv.filter(i=>i.sold&&getSaleDate(i));
+  const soldP=period==="all"?allSold:allSold.filter(i=>new Date(getSaleDate(i))>=start);
+  const expP=period==="all"?exp:exp.filter(e=>e.date&&new Date(e.date)>=start);
+  const revenue=r2(soldP.reduce((s,i)=>s+(i.sold_price||i.price),0));
+  const costs=r2(soldP.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
+  const expTotal=r2(expP.reduce((s,e)=>s+e.amount,0));
+  const grossProfit=r2(revenue-costs);
+  const netProfit=r2(grossProfit-expTotal);
+  const avgSale=soldP.length?r2(revenue/soldP.length):0;
+  const roi=costs>0?Math.round((grossProfit/costs)*100):null;
+  const str=inv.length>0?pct(allSold.length,inv.length):0;
+  // Days to sell
+  const withDates=soldP.filter(i=>i.sold_at&&i.created_at);
+  const calcDays=i=>Math.max(0,Math.floor((new Date(i.sold_at+"T12:00:00Z")-new Date(i.created_at.replace(" ","T").replace("+00","Z")))/86400000));
+  const avgDays=withDates.length?Math.round(withDates.reduce((s,i)=>s+calcDays(i),0)/withDates.length):null;
+  // Platform breakdown
+  const byPlat={};soldP.forEach(i=>{const p=i.platform||"Unknown";byPlat[p]=(byPlat[p]||0)+(i.sold_price||i.price);});
   const platMax=Math.max(...Object.values(byPlat),1);
-  const byDow={};soldAll.forEach(i=>{const k=dowKey[new Date(getSaleDate(i)).getDay()];byDow[k]=(byDow[k]||0)+(i.sold_price||i.price);});
+  // Category breakdown
+  const byCat={};soldP.forEach(i=>{const c=i.category||"Other";byCat[c]=(byCat[c]||0)+(i.sold_price||i.price);});
+  const catMax=Math.max(...Object.values(byCat),1);
+  // Day of week
+  const byDow={};soldP.forEach(i=>{const k=dowKey[new Date(getSaleDate(i)).getDay()];byDow[k]=(byDow[k]||0)+(i.sold_price||i.price);});
   const dowMax=Math.max(...Object.values(byDow),1);
-  const byMonth={};soldAll.forEach(i=>{const k=getSaleDate(i).slice(0,7);byMonth[k]=(byMonth[k]||0)+(i.sold_price||i.price);});
-  const bestMonth=Object.entries(byMonth).sort((a,b)=>b[1]-a[1])[0];
-  const withDates=inv.filter(i=>i.sold&&i.sold_at&&i.created_at);
-  const avgDays=withDates.length?Math.round(withDates.reduce((s,i)=>s+Math.max(0,Math.floor((new Date(i.sold_at)-new Date(i.created_at))/86400000)),0)/withDates.length):null;
-  const topItems=[...soldAll].filter(i=>i.cost!=null).sort((a,b)=>((b.sold_price||b.price)-b.cost)-((a.sold_price||a.price)-a.cost)).slice(0,5);
+  const bestDow=Object.entries(byDow).sort((a,b)=>b[1]-a[1])[0];
+  // Month by month for chart
+  const monthlyData=[];
+  for(let i=11;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);const v=allSold.filter(x=>getSaleDate(x)&&new Date(getSaleDate(x)).getFullYear()===d.getFullYear()&&new Date(getSaleDate(x)).getMonth()===d.getMonth()).reduce((s,x)=>s+(x.sold_price||x.price),0);monthlyData.push({l:mn[d.getMonth()],v:r2(v),hi:i===0,fmt:fmt(r2(v))});}
+  // Top items by profit
+  const topProfit=[...soldP].filter(i=>i.cost!=null).sort((a,b)=>((b.sold_price||b.price)-b.cost)-((a.sold_price||a.price)-a.cost)).slice(0,10);
+  // Quickest to sell
+  const quickest=[...withDates].sort((a,b)=>calcDays(a)-calcDays(b)).slice(0,10);
+  // Slowest to sell
+  const slowest=[...withDates].sort((a,b)=>calcDays(b)-calcDays(a)).slice(0,10);
+  // Expenses by category
+  const byCatExp={};expP.forEach(e=>{const c=e.category||"Other";byCatExp[c]=(byCatExp[c]||0)+e.amount;});
+  const expCatMax=Math.max(...Object.values(byCatExp),1);
+  // Month by month table
+  const monthTable=[];
+  for(let i=11;i>=0;i--){
+    const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+    const ms=allSold.filter(x=>getSaleDate(x)&&new Date(getSaleDate(x)).getFullYear()===d.getFullYear()&&new Date(getSaleDate(x)).getMonth()===d.getMonth());
+    const mr=r2(ms.reduce((s,x)=>s+(x.sold_price||x.price),0));
+    const mc=r2(ms.filter(x=>x.cost).reduce((s,x)=>s+x.cost,0));
+    const me=r2(exp.filter(e=>{const ed=new Date(e.date);return ed.getFullYear()===d.getFullYear()&&ed.getMonth()===d.getMonth();}).reduce((s,e)=>s+e.amount,0));
+    if(mr>0||me>0)monthTable.push({l:`${mn[d.getMonth()]} ${d.getFullYear()}`,rev:mr,cost:mc,exp:me,profit:r2(mr-mc-me),count:ms.length});
+  }
+  const SL=({label,color=C.text3})=><div style={{fontSize:11,fontWeight:700,color,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>{label}</div>;
+  const PERIODS=[{id:"today",l:"Today"},{id:"week",l:"Week"},{id:"month",l:"Month"},{id:"year",l:"Year"},{id:"all",l:"All Time"}];
   return<div>
     <PageHdr title="Analytics" sub="INSIGHTS"/>
+    {/* Period switcher */}
     <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
-      {[["overview","Overview"],["platforms","Platforms"],["categories","Categories"],["trends","Trends"]].map(([id,l])=>(
-        <button key={id} onClick={()=>setView(id)} style={{padding:"7px 16px",borderRadius:20,border:`1.5px solid ${view===id?C.accent:C.border2}`,background:view===id?C.accentL:"transparent",color:view===id?C.accent:C.text2,fontWeight:view===id?700:400,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
-      ))}
+      {PERIODS.map(p=><button key={p.id} onClick={()=>setPeriod(p.id)} style={{padding:"7px 18px",borderRadius:20,border:`1.5px solid ${period===p.id?C.accent:C.border2}`,background:period===p.id?C.accentL:"transparent",color:period===p.id?C.accent:C.text2,fontWeight:period===p.id?700:400,fontSize:13,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}>{p.l}</button>)}
     </div>
-    {view==="overview"&&<>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:20}}>
-        <StatCard icon="💰" label="Total Revenue" value={fmt(totalRev)} color={C.accent}/>
-        <StatCard icon="💹" label="Total Profit" value={fmt(totalProfit)} color={C.green}/>
-        <StatCard icon="📦" label="Items Sold" value={soldAll.length} color={C.purple}/>
-        <StatCard icon="📈" label="Avg Sale" value={soldAll.length?fmt(r2(totalRev/soldAll.length)):"—"} color={C.blue}/>
-        <StatCard icon="⏱️" label="Avg Days to Sell" value={avgDays!=null?`${avgDays}D`:"—"} color={C.gold}/>
-        <StatCard icon="🔄" label="Sell-Through" value={`${pct(soldAll.length,inv.length)}%`} color={C.teal}/>
-      </div>
-      <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Revenue — Last 12 Months</div><BarChart data={monthlyData} color={C.accent} h={110}/></>} style={{marginBottom:16}}/>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Key Stats</div>
-          {[{l:"Best month",v:bestMonth?`${bestMonth[0]} (${fmt(bestMonth[1])})`:"—",hi:true},{l:"Avg days to sell",v:avgDays!=null?`${avgDays} days`:"—"},{l:"Total expenses",v:fmt(totalExp)},{l:"Net profit",v:fmt(totalProfit),hi:true}].map(s=><div key={s.l} style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:`1px solid ${C.border}`}}><span style={{fontSize:12,color:C.text2}}>{s.l}</span><span style={{fontSize:13,fontWeight:700,color:s.hi?C.accent:C.text}}>{s.v}</span></div>)}
-        </>}/>
-        <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Day of Week</div>
-          {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=><HBar key={d} label={d} value={byDow[d]||0} max={dowMax} color={C.purple} display={fmt(byDow[d]||0)}/>)}
-        </>}/>
-      </div>
-    </>}
-    {view==="platforms"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-      <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Revenue by Platform</div>{Object.entries(byPlat).sort((a,b)=>b[1]-a[1]).map(([p,v])=><HBar key={p} label={p} value={v} max={platMax} color={C.accent} display={fmt(v)}/>)}</>}/>
-      <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Platform Stats</div>
-        {Object.entries(byPlat).sort((a,b)=>b[1]-a[1]).map(([p,v])=>{const count=soldAll.filter(i=>i.platform===p).length;return<div key={p} style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:`1px solid ${C.border}`}}><span style={{fontSize:12,color:C.text2}}>{p}</span><span style={{fontSize:12,color:C.text}}>{count} sales · {fmt(r2(v/count))} avg</span></div>;})}
+    {/* Hero stats */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:20}}>
+      <StatCard icon="💰" label="Revenue" value={fmt(revenue)} color={C.accent}/>
+      <StatCard icon="💹" label="Gross Profit" value={fmt(grossProfit)} color={C.green}/>
+      <StatCard icon="✅" label="Net Profit" value={fmt(netProfit)} color={netProfit>=0?C.green:C.red}/>
+      <StatCard icon="📦" label="Items Sold" value={soldP.length} color={C.purple}/>
+      <StatCard icon="📈" label="Avg Sale" value={fmt(avgSale)} color={C.blue}/>
+      <StatCard icon="🧾" label="Expenses" value={fmt(expTotal)} color={C.red}/>
+      {roi!=null&&<StatCard icon="📊" label="ROI" value={`${roi}%`} color={roi>=0?C.green:C.red}/>}
+      <StatCard icon="⏱️" label="Avg Days to Sell" value={avgDays!=null?`${avgDays}D`:"—"} color={C.gold}/>
+      <StatCard icon="🔄" label="Sell-Through" value={`${str}%`} color={C.teal}/>
+    </div>
+    {/* Revenue chart */}
+    <Card ch={<><SL label="Revenue — Last 12 Months"/><BarChart data={monthlyData} color={C.accent} h={110}/></>} style={{marginBottom:16}}/>
+    {/* Key stats + day of week */}
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+      <Card ch={<><SL label="Key Stats"/>
+        {[{l:"Best day of week",v:bestDow?`${bestDow[0]} (${fmt(r2(bestDow[1]))})`:"—",c:C.accent},{l:"Avg days to sell",v:avgDays!=null?`${avgDays} days`:"—",c:C.text},{l:"Gross profit",v:fmt(grossProfit),c:C.green},{l:"Net profit",v:fmt(netProfit),c:netProfit>=0?C.green:C.red},{l:"ROI",v:roi!=null?`${roi}%`:"—",c:roi!=null&&roi>=0?C.green:C.red},{l:"Sell-through rate",v:`${str}%`,c:C.text},{l:"Total expenses",v:fmt(expTotal),c:C.red}].map(s=><div key={s.l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}><span style={{fontSize:12,color:C.text2}}>{s.l}</span><span style={{fontSize:13,fontWeight:700,color:s.c}}>{s.v}</span></div>)}
       </>}/>
-    </div>}
-    {view==="categories"&&<Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Revenue by Category</div>{Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([c,v])=><HBar key={c} label={c} value={v} max={catMax} color={C.teal} display={fmt(v)}/>)}</>}/>}
-    {view==="trends"&&<>
-      <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Revenue Trend (12 months)</div><BarChart data={monthlyData} color={C.accent} h={120}/></>} style={{marginBottom:16}}/>
-      {topItems.length>0&&<Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Top Items by Profit</div>
-        {topItems.map((i,idx)=><div key={i.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
-          <span style={{fontSize:12,color:C.text3,width:16,textAlign:"right"}}>{idx+1}.</span>
-          <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.title}</div><div style={{fontSize:11,color:C.text3}}>{i.sku} · {i.platform||"—"}</div></div>
-          <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:C.green}}>{fmt(r2((i.sold_price||i.price)-i.cost))}</div><div style={{fontSize:11,color:C.text3}}>profit</div></div>
-        </div>)}
-      </>}/>}
-    </>}
+      <Card ch={<><SL label="Best Day of Week"/>
+        {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=><HBar key={d} label={d} value={byDow[d]||0} max={dowMax} color={C.purple} display={fmt(byDow[d]||0)}/>)}
+      </>}/>
+    </div>
+    {/* Platform + Category */}
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+      <Card ch={<><SL label="Revenue by Platform"/>
+        {Object.keys(byPlat).length===0?<div style={{color:C.text3,fontSize:12}}>No data</div>:Object.entries(byPlat).sort((a,b)=>b[1]-a[1]).map(([p,v])=><>
+          <HBar key={p} label={p} value={v} max={platMax} color={C.accent} display={fmt(v)}/>
+          <div style={{fontSize:10,color:C.text3,textAlign:"right",marginTop:-2,marginBottom:4}}>{soldP.filter(i=>(i.platform||"Unknown")===p).length} sales · {fmt(r2(v/Math.max(soldP.filter(i=>(i.platform||"Unknown")===p).length,1)))} avg</div>
+        </>)}
+      </>}/>
+      <Card ch={<><SL label="Revenue by Category"/>
+        {Object.keys(byCat).length===0?<div style={{color:C.text3,fontSize:12}}>No data</div>:Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([c,v])=><HBar key={c} label={c} value={v} max={catMax} color={C.teal} display={fmt(v)}/>)}
+      </>}/>
+    </div>
+    {/* Expenses by category */}
+    {Object.keys(byCatExp).length>0&&<Card ch={<><SL label="Expenses by Category"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <div>{Object.entries(byCatExp).sort((a,b)=>b[1]-a[1]).map(([c,v])=><HBar key={c} label={c.length>10?c.slice(0,10)+"…":c} value={v} max={expCatMax} color={C.red} display={fmt(v)}/>)}</div>
+        <div>{[{l:"Total expenses",v:fmt(expTotal)},{l:"Largest category",v:Object.entries(byCatExp).sort((a,b)=>b[1]-a[1])[0]?.[0]||"—"},{l:"Expense count",v:expP.length}].map(s=><div key={s.l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}><span style={{fontSize:12,color:C.text2}}>{s.l}</span><span style={{fontSize:13,fontWeight:700,color:C.text}}>{s.v}</span></div>)}</div>
+      </div>
+    </>} style={{marginBottom:16}}/>}
+    {/* Month by month table */}
+    {monthTable.length>0&&<Card ch={<><SL label="Month by Month"/>
+      <div style={{overflowX:"auto"}}><table>
+        <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:C.card2}}>{["Month","Sales","Revenue","Cost","Expenses","Profit"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.07em"}}>{h}</th>)}</tr></thead>
+        <tbody>{monthTable.map((m,i)=><tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
+          <td style={{color:C.text2,fontWeight:600}}>{m.l}</td>
+          <td style={{color:C.text}}>{m.count}</td>
+          <td style={{color:C.accent,fontWeight:700}}>{fmt(m.rev)}</td>
+          <td style={{color:C.gold}}>{m.cost>0?fmt(m.cost):"—"}</td>
+          <td style={{color:C.red}}>{m.exp>0?fmt(m.exp):"—"}</td>
+          <td style={{color:m.profit>=0?C.green:C.red,fontWeight:700}}>{fmt(m.profit)}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </>} style={{marginBottom:16}}/>}
+    {/* Top 10 by profit */}
+    {topProfit.length>0&&<Card ch={<><SL label="Top 10 — Best Profit"/>
+      {topProfit.map((i,idx)=><div key={i.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
+        <span style={{fontSize:12,color:C.text3,width:18,textAlign:"right",flexShrink:0}}>{idx+1}.</span>
+        <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.title}</div><div style={{fontSize:11,color:C.text3,marginTop:2}}>{i.sku&&`${i.sku} · `}{i.platform||"—"} · {getSaleDate(i)}</div></div>
+        <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:C.green}}>{fmt(r2((i.sold_price||i.price)-i.cost))}</div><div style={{fontSize:10,color:C.text3}}>profit</div></div>
+      </div>)}
+    </>} style={{marginBottom:16}}/>}
+    {/* Quickest to sell */}
+    {quickest.length>0&&<Card ch={<><SL label="Top 10 — Quickest to Sell"/>
+      {quickest.map((i,idx)=><div key={i.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
+        <span style={{fontSize:12,color:C.text3,width:18,textAlign:"right",flexShrink:0}}>{idx+1}.</span>
+        <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.title}</div><div style={{fontSize:11,color:C.text3,marginTop:2}}>{i.sku&&`${i.sku} · `}{i.platform||"—"}</div></div>
+        <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:C.teal}}>{calcDays(i)}D</div><div style={{fontSize:10,color:C.text3}}>to sell</div></div>
+      </div>)}
+    </>} style={{marginBottom:16}}/>}
+    {/* Slowest to sell */}
+    {slowest.length>0&&<Card ch={<><SL label="Top 10 — Slowest to Sell"/>
+      {slowest.map((i,idx)=><div key={i.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
+        <span style={{fontSize:12,color:C.text3,width:18,textAlign:"right",flexShrink:0}}>{idx+1}.</span>
+        <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.title}</div><div style={{fontSize:11,color:C.text3,marginTop:2}}>{i.sku&&`${i.sku} · `}{i.platform||"—"}</div></div>
+        <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:13,fontWeight:700,color:C.red}}>{calcDays(i)}D</div><div style={{fontSize:10,color:C.text3}}>to sell</div></div>
+      </div>)}
+    </>}/>}
   </div>;
 }
 function TaxSummary({inv,exp}){

@@ -9,6 +9,8 @@ const pct=(a,b)=>b>0?Math.round((a/b)*100):0;
 const today=()=>new Date().toISOString().slice(0,10);
 const getSaleDate=i=>i.sold_at||null;
 const dowKey=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const parseTS=ts=>{if(!ts)return null;try{return new Date(ts.replace(" ","T").replace(/\+\d{2}$/,"+00:00"));}catch{return null;}};
+const daysBetween=(fromTS,toDateStr)=>{const a=parseTS(fromTS);const b=toDateStr?new Date(toDateStr+"T12:00:00Z"):new Date();if(!a)return null;return Math.max(0,Math.floor((b-a)/86400000));};
 const TRADING_ALLOWANCE=1000;
 const PERSONAL_ALLOWANCE=12570;
 const C={bg:"#0C0F1D",card:"#131929",card2:"#1a2238",border:"rgba(255,255,255,0.07)",border2:"rgba(255,255,255,0.13)",accent:"#6366F1",accentL:"rgba(99,102,241,0.12)",accentB:"rgba(99,102,241,0.3)",gold:"#F59E0B",goldL:"rgba(245,158,11,0.12)",green:"#10B981",greenL:"rgba(16,185,129,0.12)",red:"#EF4444",redL:"rgba(239,68,68,0.1)",purple:"#8B5CF6",blue:"#3B82F6",teal:"#14B8A6",text:"#F1F5F9",text2:"rgba(255,255,255,0.5)",text3:"rgba(255,255,255,0.28)"};
@@ -88,8 +90,8 @@ function useAlerts(inv,exp,tgts,bizId){
     });
     // Stale listings — 28+ days danger, 14+ days warning
     const listed=inv.filter(i=>!i.sold&&i.created_at);
-    const stale28=listed.filter(i=>Math.floor((now-new Date(i.created_at.replace(" ","T").replace("+00","Z")))/86400000)>=28);
-    const stale14=listed.filter(i=>{const d=Math.floor((now-new Date(i.created_at.replace(" ","T").replace("+00","Z")))/86400000);return d>=14&&d<28;});
+    const stale28=listed.filter(i=>{const p=parseTS(i.created_at);return p&&Math.floor((now-p)/86400000)>=28;});
+    const stale14=listed.filter(i=>{const p=parseTS(i.created_at);if(!p)return false;const d=Math.floor((now-p)/86400000);return d>=14&&d<28;});
     if(stale28.length>0)list.push({id:"stale28",type:"danger",msg:`${stale28.length} listing${stale28.length!==1?"s":""} have been unsold for 28+ days. Consider repricing or relisting.`});
     else if(stale14.length>0)list.push({id:"stale14",type:"warning",msg:`${stale14.length} listing${stale14.length!==1?"s":""} have been unsold for 14+ days. Worth checking your prices.`});
     setAlerts(list);
@@ -380,7 +382,7 @@ function Shell({onOut}){
 }
 function ItemModal({item,onClose}){
   const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;
-  const daysToSell=item.sold&&item.sold_at&&item.created_at?Math.max(0,Math.floor((new Date(item.sold_at)-new Date(item.created_at))/86400000)):null;
+  const daysToSell=item.sold&&item.sold_at&&item.created_at?daysBetween(item.created_at,item.sold_at):null;
   const rows=[
     {l:"SKU",v:item.sku||"—"},
     {l:"Title",v:item.title},
@@ -647,7 +649,7 @@ function Inventory({inv,reload,navEdit}){
     return 0;
   });
   const sel={...DI,width:"auto",cursor:"pointer",paddingRight:30,appearance:"none",backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='rgba(255,255,255,0.35)' d='M5 7L0 2h10z'/%3E%3C/svg%3E")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 10px center"};
-  const daysListed=item=>{if(!item.created_at)return"—";const start=new Date(item.created_at.replace(" ","T").replace("+00","Z"));const end=item.sold&&item.sold_at?new Date(item.sold_at+"T12:00:00Z"):new Date();const d=Math.max(0,Math.floor((end-start)/86400000));return d===0?"Today":`${d}D`;};
+  const daysListed=item=>{const d=daysBetween(item.created_at,item.sold&&item.sold_at?item.sold_at:null);if(d===null)return"—";return d===0?"Today":`${d}D`;};
   return<div>
     <PageHdr title="Inventory" sub="STOCK MANAGEMENT"/>
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
@@ -964,8 +966,8 @@ function Analytics({inv,exp}){
   const str=inv.length>0?pct(allSold.length,inv.length):0;
   // Days to sell
   const withDates=soldP.filter(i=>i.sold_at&&i.created_at);
-  const calcDays=i=>Math.max(0,Math.floor((new Date(i.sold_at+"T12:00:00Z")-new Date(i.created_at.replace(" ","T").replace("+00","Z")))/86400000));
-  const avgDays=withDates.length?Math.round(withDates.reduce((s,i)=>s+calcDays(i),0)/withDates.length):null;
+  const calcDays=i=>daysBetween(i.created_at,i.sold_at)??0;
+  const avgDays=withDates.length?Math.round(withDates.reduce((s,i)=>s+(daysBetween(i.created_at,i.sold_at)??0),0)/withDates.length):null;
   // Platform breakdown
   const byPlat={};soldP.forEach(i=>{const p=i.platform||"Unknown";byPlat[p]=(byPlat[p]||0)+(i.sold_price||i.price);});
   const platMax=Math.max(...Object.values(byPlat),1);

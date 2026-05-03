@@ -565,6 +565,20 @@ function Dashboard({inv,exp,tgts,biz,alerts,dismissAlert}){
     </>} style={{marginBottom:20}}/>
     {/* Calendar */}
     <DashCalendar inv={inv} exp={exp}/>
+    {/* Recent Sales */}
+    {(()=>{const recent=inv.filter(i=>i.sold&&getSaleDate(i)).sort((a,b)=>new Date(getSaleDate(b))-new Date(getSaleDate(a))).slice(0,10);return recent.length>0&&<Card ch={<>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Recently Sold</div>
+      {recent.map(i=>{const profit=i.cost!=null?r2((i.sold_price||i.price)-i.cost):null;return<div key={i.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 0",borderBottom:`1px solid ${C.border}`}}>
+        <div style={{overflow:"hidden",flex:1}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:240}}>{i.title}</div>
+          <div style={{fontSize:11,color:C.text3,marginTop:3}}>{i.sku&&`${i.sku} · `}{getSaleDate(i)}{i.platform&&` · ${i.platform}`}</div>
+        </div>
+        <div style={{textAlign:"right",marginLeft:12,flexShrink:0}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.green}}>{fmt(i.sold_price||i.price)}</div>
+          {profit!=null&&<div style={{fontSize:11,color:profit>=0?C.green:C.red,marginTop:2}}>{profit>=0?"+":""}{fmt(profit)} profit</div>}
+        </div>
+      </div>;})}
+    </>} style={{marginTop:20}}/>;})()}
   </div>;
 }
 function QuickSale({inv,biz,reload}){

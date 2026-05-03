@@ -388,7 +388,7 @@ function Shell({onOut}){
 }
 function ItemModal({item,onClose}){
   const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;
-  const daysToSell=item.sold&&item.sold_at&&item.created_at?daysBetween(item.created_at,item.sold_at):null;
+  const daysToSell=item.sold&&item.sold_at&&item.created_at&&item.sold_at>="2026-05-02"?daysBetween(item.created_at,item.sold_at):null;
   const rows=[
     {l:"SKU",v:item.sku||"—"},
     {l:"Title",v:item.title},
@@ -655,7 +655,7 @@ function Inventory({inv,reload,navEdit}){
     return 0;
   });
   const sel={...DI,width:"auto",cursor:"pointer",paddingRight:30,appearance:"none",backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='rgba(255,255,255,0.35)' d='M5 7L0 2h10z'/%3E%3C/svg%3E")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 10px center"};
-  const daysListed=item=>{const d=daysBetween(item.created_at,item.sold&&item.sold_at?item.sold_at:null);if(d===null)return"—";return d===0?"Today":`${d}D`;};
+  const CUTOFF="2026-05-02";const daysListed=item=>{if(item.sold&&item.sold_at&&item.sold_at<CUTOFF)return"N/A";const d=daysBetween(item.created_at,item.sold&&item.sold_at?item.sold_at:null);if(d===null)return"—";return d===0?"Today":`${d}D`;};
   return<div>
     <PageHdr title="Inventory" sub="STOCK MANAGEMENT"/>
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
@@ -971,8 +971,8 @@ function Analytics({inv,exp}){
   const roi=costs>0?Math.round((grossProfit/costs)*100):null;
   const str=inv.length>0?pct(allSold.length,inv.length):0;
   // Days to sell
-  const withDates=soldP.filter(i=>i.sold_at&&i.created_at);
-  const calcDays=i=>daysBetween(i.created_at,i.sold_at)??0;
+  const withDates=soldP.filter(i=>i.sold_at&&i.created_at&&i.sold_at>=CUTOFF);
+  const CUTOFF="2026-05-02";const calcDays=i=>{if(!i.sold_at||i.sold_at<CUTOFF)return null;return daysBetween(i.created_at,i.sold_at)??0;};
   const avgDays=withDates.length?Math.round(withDates.reduce((s,i)=>s+(daysBetween(i.created_at,i.sold_at)??0),0)/withDates.length):null;
   // Platform breakdown
   const byPlat={};soldP.forEach(i=>{const p=i.platform||"Unknown";byPlat[p]=(byPlat[p]||0)+(i.sold_price||i.price);});
@@ -990,9 +990,9 @@ function Analytics({inv,exp}){
   // Top items by profit
   const topProfit=[...soldP].filter(i=>i.cost!=null).sort((a,b)=>((b.sold_price||b.price)-b.cost)-((a.sold_price||a.price)-a.cost)).slice(0,10);
   // Quickest to sell
-  const quickest=[...withDates].sort((a,b)=>calcDays(a)-calcDays(b)).slice(0,10);
+  const quickest=[...withDates].filter(i=>calcDays(i)!==null).sort((a,b)=>calcDays(a)-calcDays(b)).slice(0,10);
   // Slowest to sell
-  const slowest=[...withDates].sort((a,b)=>calcDays(b)-calcDays(a)).slice(0,10);
+  const slowest=[...withDates].filter(i=>calcDays(i)!==null).sort((a,b)=>calcDays(b)-calcDays(a)).slice(0,10);
   // Expenses by category
   const byCatExp={};expP.forEach(e=>{const c=e.category||"Other";byCatExp[c]=(byCatExp[c]||0)+e.amount;});
   const expCatMax=Math.max(...Object.values(byCatExp),1);
@@ -1304,4 +1304,3 @@ function Settings({biz,bizList,onBizChange,onBizCreated,onBizDeleted,onOut}){
     }/>}
   </div>;
 }
-

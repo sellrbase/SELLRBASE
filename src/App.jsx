@@ -10,7 +10,13 @@ const today=()=>new Date().toISOString().slice(0,10);
 const getSaleDate=i=>i.sold_at||null;
 const dowKey=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const parseTS=ts=>{if(!ts)return null;try{return new Date(ts.replace(" ","T").replace(/\+\d{2}$/,"+00:00"));}catch{return null;}};
-const daysBetween=(fromTS,toDateStr)=>{const a=parseTS(fromTS);const b=toDateStr?new Date(toDateStr+"T12:00:00Z"):new Date();if(!a)return null;return Math.max(0,Math.floor((b-a)/86400000));};
+const tsToDate=ts=>{if(!ts)return null;return ts.slice(0,10);};
+const daysBetween=(fromTS,toDateStr)=>{
+  const fromDate=tsToDate(fromTS);if(!fromDate)return null;
+  const a=new Date(fromDate+"T00:00:00Z");
+  const b=toDateStr?new Date(toDateStr+"T00:00:00Z"):new Date(new Date().toISOString().slice(0,10)+"T00:00:00Z");
+  return Math.max(0,Math.floor((b-a)/86400000));
+};
 const TRADING_ALLOWANCE=1000;
 const PERSONAL_ALLOWANCE=12570;
 const C={bg:"#0C0F1D",card:"#131929",card2:"#1a2238",border:"rgba(255,255,255,0.07)",border2:"rgba(255,255,255,0.13)",accent:"#6366F1",accentL:"rgba(99,102,241,0.12)",accentB:"rgba(99,102,241,0.3)",gold:"#F59E0B",goldL:"rgba(245,158,11,0.12)",green:"#10B981",greenL:"rgba(16,185,129,0.12)",red:"#EF4444",redL:"rgba(239,68,68,0.1)",purple:"#8B5CF6",blue:"#3B82F6",teal:"#14B8A6",text:"#F1F5F9",text2:"rgba(255,255,255,0.5)",text3:"rgba(255,255,255,0.28)"};
@@ -1094,9 +1100,9 @@ function TaxSummary({inv,exp}){
   const[yr,setYr]=useState("2025/26");
   const YEARS=["2024/25","2025/26","2026/27","2027/28","2028/29"];
   const y1=parseInt(yr.split("/")[0]);
-  const start=new Date(`${y1}-04-06`);const end=new Date(`${y1+1}-04-05T23:59:59`);
-  const yrSales=inv.filter(i=>i.sold&&getSaleDate(i)).filter(i=>{const d=new Date(getSaleDate(i));return d>=start&&d<=end;});
-  const yrExp=exp.filter(e=>{const d=new Date(e.date);return d>=start&&d<=end;});
+  const start=`${y1}-04-06`;const end=`${y1+1}-04-05`;
+  const yrSales=inv.filter(i=>i.sold&&getSaleDate(i)).filter(i=>{const d=getSaleDate(i);return d>=start&&d<=end;});
+  const yrExp=exp.filter(e=>{const d=e.date;return d>=start&&d<=end;});
   const totalSales=r2(yrSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
   const totalCosts=r2(yrSales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
   const totalExp=r2(yrExp.reduce((s,e)=>s+e.amount,0));
@@ -1110,8 +1116,8 @@ function TaxSummary({inv,exp}){
   const MN=["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
   const periods=MN.map((l,i)=>{
     const [mm,yy]=i<9?[i+4,y1]:[i-8,y1+1];
-    const s=new Date(`${yy}-${String(mm).padStart(2,"0")}-01`);
-    const e=new Date(yy,mm,0,23,59,59);
+    const s=`${yy}-${String(mm).padStart(2,"0")}-01`;
+    const e=`${yy}-${String(mm).padStart(2,"0")}-${String(new Date(yy,mm,0).getDate()).padStart(2,"0")}`;
     return{l,s,e};
   });
   const exportCSV=()=>{
@@ -1144,8 +1150,8 @@ function TaxSummary({inv,exp}){
         <table>
           <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:C.card2}}>{["Period","Sales","Expenses","Net"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>{h}</th>)}</tr></thead>
           <tbody>{periods.map(p=>{
-            const ps=r2(yrSales.filter(s=>{const d=new Date(getSaleDate(s));return d>=p.s&&d<=p.e;}).reduce((s,i)=>s+(i.sold_price||i.price),0));
-            const pe=r2(yrExp.filter(e=>{const d=new Date(e.date);return d>=p.s&&d<=p.e;}).reduce((s,e)=>s+e.amount,0));
+            const ps=r2(yrSales.filter(s=>getSaleDate(s)>=p.s&&getSaleDate(s)<=p.e).reduce((s,i)=>s+(i.sold_price||i.price),0));
+            const pe=r2(yrExp.filter(e=>e.date>=p.s&&e.date<=p.e).reduce((s,e)=>s+e.amount,0));
             const net=r2(ps-pe);
             return<tr key={p.l} style={{borderBottom:`1px solid ${C.border}`}}>
               <td style={{color:C.text2}}>{p.l}</td>
@@ -1298,3 +1304,4 @@ function Settings({biz,bizList,onBizChange,onBizCreated,onBizDeleted,onOut}){
     }/>}
   </div>;
 }
+

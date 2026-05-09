@@ -28,7 +28,7 @@ const Card=({ch,style={}})=><div style={{background:C.card,border:`1px solid ${C
 const Divider=()=><div style={{height:1,background:C.border,margin:"12px 0"}}/>;
 const Btn=({ch,onClick,variant="primary",disabled=false,full=false,small=false,style={}})=>{
   const base={border:"none",borderRadius:9,padding:small?"7px 14px":"11px 20px",fontSize:small?12:14,fontWeight:600,cursor:disabled?"not-allowed":"pointer",fontFamily:"inherit",opacity:disabled?0.5:1,transition:"opacity 0.15s",width:full?"100%":"auto",...style};
-  const v={primary:{...base,background:C.accent,color:"#fff"},ghost:{...base,background:"rgba(255,255,255,0.06)",color:C.text2,border:`1px solid ${C.border}`},danger:{...base,background:C.redL,color:C.red,border:"1px solid rgba(239,68,68,0.25)"},success:{...base,background:C.greenL,color:C.green,border:"1px solid rgba(16,185,129,0.25)"}};
+  const v={primary:{...base,background:C.accent,color:"#fff"},ghost:{...base,background:"rgba(255,255,255,0.06)",color:C.text2,border:`1px solid ${C.border}`},danger:{...base,background:C.redL,color:C.red,border:"1px solid rgba(239,68,68,0.25)"},success:{...base,background:C.greenL,color:C.green,border:"1px solid rgba(16,185,129,0.25)"},gold:{...base,background:C.goldL,color:C.gold,border:"1px solid rgba(245,158,11,0.25)"}};
   return<button onClick={onClick} disabled={disabled} style={v[variant]||v.primary}>{ch}</button>;
 };
 const Msg=({ok,ch})=><div style={{background:ok?C.greenL:C.redL,border:`1px solid ${ok?"rgba(16,185,129,0.3)":"rgba(239,68,68,0.25)"}`,borderRadius:10,padding:"10px 14px",fontSize:13,marginTop:8,color:ok?C.green:C.red}}>{ch}</div>;
@@ -361,7 +361,7 @@ function Shell({onOut}){
           {page==="dashboard"&&<Dashboard {...pp} alerts={alerts} dismissAlert={dismissAlert}/>}
           {page==="quick"&&<QuickSale {...pp}/>}
           {page==="inventory"&&<Inventory {...pp}/>}
-          {page==="add"&&<AddStock {...pp}/>}
+          {page==="add"&&<AddStock {...pp} inv={inv}/>}
           {page==="edit"&&<EditStock {...pp}/>}
           {page==="comp"&&<CompPricing/>}
           {page==="expenses"&&<Expenses {...pp}/>}
@@ -369,7 +369,7 @@ function Shell({onOut}){
           {page==="analytics"&&<Analytics {...pp}/>}
           {page==="tax"&&<TaxSummary {...pp}/>}
           {page==="targets"&&<Targets {...pp}/>}
-          {page==="settings"&&<Settings biz={biz} bizList={bizList} onBizChange={b=>{setBiz(b);setShowBizSwitcher(false);}} onBizCreated={loadBiz} onBizDeleted={()=>{loadBiz();setBiz(null);}} onOut={onOut}/>}
+          {page==="settings"&&<Settings biz={biz} bizList={bizList} inv={inv} exp={exp} onBizChange={b=>{setBiz(b);setShowBizSwitcher(false);}} onBizCreated={loadBiz} onBizDeleted={()=>{loadBiz();setBiz(null);}} onOut={onOut} reload={reload}/>}
         </>}
       </div>
     </div>
@@ -712,10 +712,17 @@ function Inventory({inv,reload,navEdit}){
     </div>
   </div>;
 }
-function AddStock({biz,reload,addForm,setAddForm}){
+function AddStock({biz,inv,reload,addForm,setAddForm}){
   const[busy,setBusy]=useState(false);const[ok,setOk]=useState(false);const[err,setErr]=useState(null);
   const f=k=>e=>setAddForm(p=>({...p,[k]:e.target.value}));
   const CATS=["Clothing","Footwear","Electronics","Collectibles","Books","Homeware","Toys","Jewellery","Art","Vintage","Other"];
+  useEffect(()=>{
+    if(!biz||!biz.sku_prefix)return;
+    const prefix=biz.sku_prefix.toUpperCase();
+    const nums=(inv||[]).map(i=>i.sku||"").filter(s=>s.startsWith(prefix)).map(s=>parseInt(s.slice(prefix.length))).filter(n=>!isNaN(n));
+    const highest=nums.length?Math.max(...nums):(biz.sku_start||1)-1;
+    setAddForm(p=>({...p,sku:`${prefix}${highest+1}`}));
+  },[biz,inv]);
   const save=async()=>{
     if(!addForm.title||!addForm.price)return;setBusy(true);setErr(null);
     const qty=Math.max(1,parseInt(addForm.quantity)||1);
@@ -1281,9 +1288,12 @@ function Targets({inv,exp,tgts,biz,reload}){
     }/>}
   </div>;
 }
-function Settings({biz,bizList,onBizChange,onBizCreated,onBizDeleted,onOut}){
+function Settings({biz,bizList,inv,exp,onBizChange,onBizCreated,onBizDeleted,onOut,reload}){
   const[tab,setTab]=useState("businesses");const[editBiz,setEditBiz]=useState(null);const[bizName,setBizName]=useState("");const[bizDesc,setBizDesc]=useState("");const[busy,setBusy]=useState(false);const[user,setUser]=useState(null);
+  const[skuPrefix,setSkuPrefix]=useState(biz?.sku_prefix||"LL");const[skuStart,setSkuStart]=useState(biz?.sku_start||1);const[skuSaved,setSkuSaved]=useState(false);
+  const[importing,setImporting]=useState(false);const[importDone,setImportDone]=useState(null);
   useEffect(()=>{supabase.auth.getUser().then(({data})=>setUser(data.user));},[]);
+  useEffect(()=>{if(biz){setSkuPrefix(biz.sku_prefix||"LL");setSkuStart(biz.sku_start||1);}},[biz]);
   const saveEdit=async()=>{
     if(!editBiz||!bizName.trim())return;setBusy(true);
     await supabase.from("businesses").update({name:bizName.trim(),description:bizDesc.trim()||null}).eq("id",editBiz.id);
@@ -1293,10 +1303,37 @@ function Settings({biz,bizList,onBizChange,onBizCreated,onBizDeleted,onOut}){
     if(!window.confirm(`Delete "${b.name}" and all its data permanently?`))return;
     await supabase.from("businesses").delete().eq("id",b.id);onBizDeleted();
   };
+  const saveSku=async()=>{
+    if(!biz)return;setBusy(true);
+    await supabase.from("businesses").update({sku_prefix:skuPrefix.trim().toUpperCase(),sku_start:parseInt(skuStart)||1}).eq("id",biz.id);
+    onBizCreated();setSkuSaved(true);setTimeout(()=>setSkuSaved(false),2500);setBusy(false);
+  };
+  const importCosts=async()=>{
+    if(!biz)return;
+    if(!window.confirm("This will create a Stock expense for every inventory item that has a cost price. Continue?"))return;
+    setImporting(true);
+    const itemsWithCost=inv.filter(i=>i.cost&&i.cost>0);
+    let count=0;
+    for(const item of itemsWithCost){
+      const desc=`Stock purchase: ${item.title}${(item.quantity||1)>1?` (x${item.quantity})`:""}`;
+      const amount=r2(item.cost*(item.quantity||1));
+      const{error}=await supabase.from("expenses").insert([{business_id:biz.id,date:item.created_at?tsToDate(item.created_at):today(),amount,description:desc,category:"Stock"}]);
+      if(!error)count++;
+    }
+    reload();setImportDone(count);setImporting(false);
+  };
+  // Preview next SKU
+  const nextSku=()=>{
+    if(!skuPrefix.trim())return"—";
+    const prefix=skuPrefix.trim().toUpperCase();
+    const nums=inv.map(i=>i.sku||"").filter(s=>s.startsWith(prefix)).map(s=>parseInt(s.slice(prefix.length))).filter(n=>!isNaN(n));
+    const highest=nums.length?Math.max(...nums):parseInt(skuStart)-1;
+    return`${prefix}${highest+1}`;
+  };
   return<div>
     <PageHdr title="Settings" sub="ACCOUNT"/>
     <div style={{display:"flex",gap:6,marginBottom:20,flexWrap:"wrap"}}>
-      {[["businesses","Businesses"],["account","Account"]].map(([id,l])=>(
+      {[["businesses","Businesses"],["sku","SKU Setup"],["tools","Tools"],["account","Account"]].map(([id,l])=>(
         <button key={id} onClick={()=>setTab(id)} style={{padding:"7px 16px",borderRadius:20,border:`1.5px solid ${tab===id?C.accent:C.border2}`,background:tab===id?C.accentL:"transparent",color:tab===id?C.accent:C.text2,fontWeight:tab===id?700:400,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
       ))}
     </div>
@@ -1316,6 +1353,32 @@ function Settings({biz,bizList,onBizChange,onBizCreated,onBizDeleted,onOut}){
       </div>
       <Card ch={<><div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Add New Business</div><CreateBizForm onDone={onBizCreated}/></>}/>
     </>}
+    {tab==="sku"&&<Card ch={<>
+      <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>SKU Setup</div>
+      <div style={{fontSize:13,color:C.text2,marginBottom:16,lineHeight:1.6}}>Set your SKU prefix and starting number. When you add stock the SKU will auto-populate with the next available number.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+        <Input label="SKU Prefix" placeholder="e.g. LL" value={skuPrefix} onChange={e=>setSkuPrefix(e.target.value)}/>
+        <Input label="Start From" type="number" placeholder="e.g. 23" value={skuStart} onChange={e=>setSkuStart(e.target.value)}/>
+      </div>
+      <div style={{background:C.accentL,border:`1px solid ${C.accentB}`,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+        <div style={{fontSize:11,color:C.text3,marginBottom:4}}>Next SKU preview</div>
+        <div style={{fontSize:22,fontWeight:900,color:C.accent}}>{nextSku()}</div>
+      </div>
+      {skuSaved&&<Msg ok ch="✅ SKU settings saved!"/>}
+      <Btn ch={busy?"Saving…":"Save SKU Settings"} onClick={saveSku} disabled={busy||!skuPrefix.trim()} full/>
+    </>}/>}
+    {tab==="tools"&&<div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <Card ch={<>
+        <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Import Cost Prices as Expenses</div>
+        <div style={{fontSize:13,color:C.text2,marginBottom:14,lineHeight:1.6}}>Creates a Stock expense entry for every inventory item that has a cost price recorded. Use this once to backfill your existing stock. Items without a cost price are skipped.</div>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:`1px solid ${C.border}`,marginBottom:14}}>
+          <span style={{fontSize:13,color:C.text2}}>Items with cost prices</span>
+          <span style={{fontSize:13,fontWeight:700,color:C.text}}>{inv.filter(i=>i.cost&&i.cost>0).length}</span>
+        </div>
+        {importDone!=null&&<Msg ok ch={`✅ Created ${importDone} expense entries.`}/>}
+        <Btn ch={importing?"Importing…":"Import Cost Prices → Expenses"} onClick={importCosts} disabled={importing||inv.filter(i=>i.cost&&i.cost>0).length===0} variant="gold" full/>
+      </>}/>
+    </div>}
     {tab==="account"&&<Card ch={<>
       <div style={{fontSize:11,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Account Details</div>
       <div style={{display:"flex",flexDirection:"column",gap:0,marginBottom:20}}>

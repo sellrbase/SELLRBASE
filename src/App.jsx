@@ -1310,17 +1310,20 @@ function Settings({biz,bizList,inv,exp,onBizChange,onBizCreated,onBizDeleted,onO
   };
   const importCosts=async()=>{
     if(!biz)return;
-    if(!window.confirm("This will create a Stock expense for every inventory item that has a cost price. Continue?"))return;
+    if(!window.confirm("This will create a Stock expense for every inventory item that has a cost price and hasn't already been imported. Continue?"))return;
     setImporting(true);
     const itemsWithCost=inv.filter(i=>i.cost&&i.cost>0);
-    let count=0;
+    // Build a set of descriptions already in expenses to avoid duplicates
+    const existingDescs=new Set(exp.filter(e=>e.category==="Stock").map(e=>e.description));
+    let count=0;let skipped=0;
     for(const item of itemsWithCost){
       const desc=`Stock purchase: ${item.title}${(item.quantity||1)>1?` (x${item.quantity})`:""}`;
+      if(existingDescs.has(desc)){skipped++;continue;}
       const amount=r2(item.cost*(item.quantity||1));
       const{error}=await supabase.from("expenses").insert([{business_id:biz.id,date:item.created_at?tsToDate(item.created_at):today(),amount,description:desc,category:"Stock"}]);
       if(!error)count++;
     }
-    reload();setImportDone(count);setImporting(false);
+    reload();setImportDone({count,skipped});setImporting(false);
   };
   // Preview next SKU
   const nextSku=()=>{
@@ -1375,7 +1378,7 @@ function Settings({biz,bizList,inv,exp,onBizChange,onBizCreated,onBizDeleted,onO
           <span style={{fontSize:13,color:C.text2}}>Items with cost prices</span>
           <span style={{fontSize:13,fontWeight:700,color:C.text}}>{inv.filter(i=>i.cost&&i.cost>0).length}</span>
         </div>
-        {importDone!=null&&<Msg ok ch={`✅ Created ${importDone} expense entries.`}/>}
+        {importDone!=null&&<Msg ok ch={`✅ Created ${importDone.count} expense entries. ${importDone.skipped>0?`${importDone.skipped} already existed and were skipped.`:""}`}/>}
         <Btn ch={importing?"Importing…":"Import Cost Prices → Expenses"} onClick={importCosts} disabled={importing||inv.filter(i=>i.cost&&i.cost>0).length===0} variant="gold" full/>
       </>}/>
     </div>}

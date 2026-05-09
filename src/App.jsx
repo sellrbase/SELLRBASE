@@ -287,7 +287,7 @@ function Shell({onOut}){
   const[inv,setInv]=useState([]);const[exp,setExp]=useState([]);const[cal,setCal]=useState([]);const[tgts,setTgts]=useState([]);
   const[loading,setLoading]=useState(false);const[sideOpen,setSideOpen]=useState(false);const[showBizSwitcher,setShowBizSwitcher]=useState(false);
   const[editSku,setEditSku]=useState("");
-  const[addForm,setAddForm]=useState({sku:"",title:"",cost:"",price:"",note:"",platform:"eBay",category:"Clothing",location:""});
+  const[addForm,setAddForm]=useState({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:"",quantity:"1"});
   const[expForm,setExpForm]=useState({date:"",amount:"",description:"",category:"Stock",due_date:"",recurring:false});
   const[alerts,dismissAlert]=useAlerts(inv,exp,tgts,biz?.id);
   const loadBiz=useCallback(async()=>{
@@ -593,15 +593,27 @@ function QuickSale({inv,biz,reload}){
   const[q,setQ]=useState("");const[found,setFound]=useState(null);const[nf,setNf]=useState(false);
   const[soldFor,setSoldFor]=useState("");const[atList,setAtList]=useState(true);const[soldAt,setSoldAt]=useState(today());
   const[busy,setBusy]=useState(false);const[ok,setOk]=useState(false);const[err,setErr]=useState(null);
-  const[platform,setPlatform]=useState("eBay");
+  const[platform,setPlatform]=useState("eBay");const[qtySold,setQtySold]=useState(1);
   const PLATS=["eBay","Vinted","Depop","Poshmark","Facebook","Instagram","Etsy","Other"];
-  const search=async()=>{setNf(false);setFound(null);setOk(false);setErr(null);const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",q.trim()).single();if(!data)setNf(true);else{setFound(data);setSoldFor(String(data.price));setAtList(true);}};
+  const search=async()=>{setNf(false);setFound(null);setOk(false);setErr(null);const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",q.trim()).single();if(!data)setNf(true);else{setFound(data);setSoldFor(String(data.price));setAtList(true);setQtySold(1);}};
   const save=async()=>{
     if(!found)return;if(!atList&&(!soldFor||parseFloat(soldFor)<=0)){setErr("Enter the sold price.");return;}
     setBusy(true);setErr(null);
     const sp=atList?r2(found.price):r2(parseFloat(soldFor));
-    const{error}=await supabase.from("inventory").update({sold:true,sold_at:soldAt,sold_price:sp,platform}).eq("id",found.id);
-    if(error)setErr(error.message);else{setOk(true);setFound(null);setQ("");setPlatform("eBay");reload();}
+    const qty=Math.max(1,Math.min(qtySold,found.quantity||1));
+    const remaining=(found.quantity||1)-qty;
+    if(remaining<=0){
+      // all sold - mark item as sold
+      const{error}=await supabase.from("inventory").update({sold:true,sold_at:soldAt,sold_price:sp,platform,quantity:0}).eq("id",found.id);
+      if(error){setErr(error.message);setBusy(false);return;}
+    } else {
+      // partial - reduce quantity, insert sold record for analytics
+      const{error}=await supabase.from("inventory").update({quantity:remaining}).eq("id",found.id);
+      if(error){setErr(error.message);setBusy(false);return;}
+      // insert a sold row for analytics
+      await supabase.from("inventory").insert([{business_id:biz.id,sku:found.sku,title:found.title,cost:found.cost,price:found.price,sold:true,sold_at:soldAt,sold_price:sp,platform,category:found.category,location:found.location,quantity:qty}]);
+    }
+    setOk(true);setFound(null);setQ("");setPlatform("eBay");setQtySold(1);reload();
     setBusy(false);
   };
   return<div style={{maxWidth:480,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 600px) / 2))"}}>
@@ -627,6 +639,10 @@ function QuickSale({inv,biz,reload}){
         <Input label="Date Sold" type="date" value={soldAt} onChange={e=>setSoldAt(e.target.value)}/>
         <Sel label="Platform Sold On" ch={PLATS.map(p=><option key={p}>{p}</option>)} value={platform} onChange={e=>setPlatform(e.target.value)}/>
       </div>
+      {(found.quantity||1)>1&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Input label={`Qty Sold (max ${found.quantity||1})`} type="number" value={qtySold} onChange={e=>setQtySold(Math.max(1,Math.min(parseInt(e.target.value)||1,found.quantity||1)))}/>
+        <div style={{display:"flex",alignItems:"flex-end",paddingBottom:2}}><div style={{fontSize:12,color:C.text2}}>{(found.quantity||1)-Math.max(1,Math.min(qtySold,found.quantity||1))} remaining after sale</div></div>
+      </div>}
       <Input label="Sold Price (£)" type="number" placeholder={String(found.price)} value={soldFor} onChange={e=>{setSoldFor(e.target.value);setAtList(parseFloat(e.target.value)===found.price);}}/>
       <div onClick={()=>{setAtList(!atList);setSoldFor(String(found.price));}} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:C.accentL,borderRadius:10,border:`1px solid ${atList?C.accentB:C.border}`,cursor:"pointer"}}>
         <div style={{width:20,height:20,borderRadius:5,border:`2px solid ${atList?C.accent:C.text3}`,background:atList?C.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{atList&&<span style={{color:"#fff",fontSize:11,fontWeight:700}}>✓</span>}</div>
@@ -674,7 +690,7 @@ function Inventory({inv,reload,navEdit}){
       <div style={{overflowX:"auto"}}>
         <table>
           <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:C.card2}}>
-            {["SKU","Title","Cost","Price","Profit","Status","Platform","Listed","Sold","Days"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>{h}</th>)}
+            {["SKU","Title","Cost","Price","Qty","Profit","Status","Platform","Listed","Sold","Days"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>{h}</th>)}
           </tr></thead>
           <tbody>
             {filtered.length===0&&<tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.text3}}>No items found.</td></tr>}
@@ -702,24 +718,33 @@ function AddStock({biz,reload,addForm,setAddForm}){
   const CATS=["Clothing","Footwear","Electronics","Collectibles","Books","Homeware","Toys","Jewellery","Art","Vintage","Other"];
   const save=async()=>{
     if(!addForm.title||!addForm.price)return;setBusy(true);setErr(null);
-    const{error}=await supabase.from("inventory").insert([{business_id:biz.id,sku:addForm.sku.trim().toUpperCase()||null,title:addForm.title.trim(),cost:addForm.cost?r2(parseFloat(addForm.cost)):null,price:r2(parseFloat(addForm.price)),note:addForm.note.trim()||null,category:addForm.category||"Other",location:addForm.location.trim()||null,sold:false}]);
-    if(error)setErr(error.message);else{setAddForm({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:""});setOk(true);setTimeout(()=>setOk(false),3000);reload();}
+    const qty=Math.max(1,parseInt(addForm.quantity)||1);
+    const cost=addForm.cost?r2(parseFloat(addForm.cost)):null;
+    const{error}=await supabase.from("inventory").insert([{business_id:biz.id,sku:addForm.sku.trim().toUpperCase()||null,title:addForm.title.trim(),cost,price:r2(parseFloat(addForm.price)),note:addForm.note.trim()||null,category:addForm.category||"Other",location:addForm.location.trim()||null,sold:false,quantity:qty}]);
+    if(error){setErr(error.message);setBusy(false);return;}
+    if(cost&&cost>0){
+      const totalCost=r2(cost*qty);
+      await supabase.from("expenses").insert([{business_id:biz.id,date:today(),amount:totalCost,description:`Stock purchase: ${addForm.title.trim()}${qty>1?` (x${qty})`:""}`,category:"Stock"}]);
+    }
+    setAddForm({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:"",quantity:"1"});setOk(true);setTimeout(()=>setOk(false),3000);reload();
     setBusy(false);
   };
-  return<div style={{maxWidth:560,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 620px) / 2))"}}>    
+  return<div style={{maxWidth:560,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 660px) / 2))"}}>
     <PageHdr title="Add Stock" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",flexDirection:"column",gap:14}}>
       <Input label="Item Title" req placeholder="e.g. Vintage Carhartt Chore Coat" value={addForm.title} onChange={f("title")}/>
       <Input label="SKU / Reference (optional)" placeholder="e.g. B001" value={addForm.sku} onChange={f("sku")}/>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
         <Input label="Cost Price (£)" type="number" placeholder="12.00" value={addForm.cost} onChange={f("cost")}/>
         <Input label="Listing Price (£)" req type="number" placeholder="45.00" value={addForm.price} onChange={f("price")}/>
+        <Input label="Quantity" type="number" placeholder="1" value={addForm.quantity||"1"} onChange={f("quantity")}/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Sel label="Category" ch={CATS.map(c=><option key={c}>{c}</option>)} value={addForm.category} onChange={f("category")}/>
         <Input label="Storage Location" placeholder="e.g. Box 3" value={addForm.location} onChange={f("location")}/>
       </div>
       <Input label="Notes" placeholder="e.g. Size M, minor fading" value={addForm.note} onChange={f("note")}/>
+      {addForm.cost&&parseFloat(addForm.cost)>0&&<div style={{fontSize:12,color:C.text3,background:C.goldL,border:`1px solid rgba(245,158,11,0.2)`,borderRadius:8,padding:"8px 12px"}}>💡 Cost of {fmt(r2(parseFloat(addForm.cost||0)*(parseInt(addForm.quantity)||1)))} will be auto-logged as a Stock expense</div>}
       {err&&<Msg ch={err}/>}{ok&&<Msg ok ch="✅ Added to inventory!"/>}
       <Btn ch={busy?"Saving…":"Add to Inventory"} onClick={save} disabled={busy||!addForm.title||!addForm.price} full/>
     </div>}/>
@@ -733,11 +758,11 @@ function EditStock({biz,reload,editSku}){
   const doSearch=async(sku)=>{
     const s=(sku||q).trim();if(!s)return;setNf(false);setFound(null);setOk(false);setErr(null);
     const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",s).single();
-    if(!data)setNf(true);else{setFound(data);setEd({price:data.price,note:data.note||"",category:data.category||"Clothing",location:data.location||""});}
+    if(!data)setNf(true);else{setFound(data);setEd({price:data.price,note:data.note||"",category:data.category||"Clothing",location:data.location||"",quantity:data.quantity||1});}
   };
   const save=async()=>{
     if(!ed)return;setBusy(true);setErr(null);
-    const updates={price:r2(parseFloat(ed.price)),note:ed.note||null,category:ed.category,location:ed.location||null};
+    const updates={price:r2(parseFloat(ed.price)),note:ed.note||null,category:ed.category,location:ed.location||null,quantity:Math.max(1,parseInt(ed.quantity)||1)};
     const{error}=await supabase.from("inventory").update(updates).eq("id",found.id);
     if(error)setErr(error.message);else{setOk(true);setTimeout(()=>setOk(false),2500);reload();setFound(p=>({...p,...updates}));}
     setBusy(false);
@@ -760,7 +785,10 @@ function EditStock({biz,reload,editSku}){
         </div>
       </div>
       <Divider/>
-      <Input label="Listing Price (£)" type="number" value={ed.price} onChange={e=>setEd(p=>({...p,price:e.target.value}))}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Input label="Listing Price (£)" type="number" value={ed.price} onChange={e=>setEd(p=>({...p,price:e.target.value}))}/>
+        <Input label="Quantity" type="number" value={ed.quantity} onChange={e=>setEd(p=>({...p,quantity:e.target.value}))}/>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Sel label="Category" ch={CATS.map(c=><option key={c}>{c}</option>)} value={ed.category} onChange={e=>setEd(p=>({...p,category:e.target.value}))}/>
         <Input label="Location" placeholder="e.g. Box 3" value={ed.location} onChange={e=>setEd(p=>({...p,location:e.target.value}))}/>

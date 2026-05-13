@@ -20,6 +20,7 @@ const daysBetween=(fromTS,toDateStr)=>{
 const TRADING_ALLOWANCE=1000;
 const PERSONAL_ALLOWANCE=12570;
 const C={bg:"#0C0F1D",card:"#131929",card2:"#1a2238",border:"rgba(255,255,255,0.07)",border2:"rgba(255,255,255,0.13)",accent:"#6366F1",accentL:"rgba(99,102,241,0.12)",accentB:"rgba(99,102,241,0.3)",gold:"#F59E0B",goldL:"rgba(245,158,11,0.12)",green:"#10B981",greenL:"rgba(16,185,129,0.12)",red:"#EF4444",redL:"rgba(239,68,68,0.1)",purple:"#8B5CF6",blue:"#3B82F6",teal:"#14B8A6",text:"#F1F5F9",text2:"rgba(255,255,255,0.5)",text3:"rgba(255,255,255,0.28)"};
+const stockBadgeStyle=(item)=>{const st=item?.stock_status||"Listed";if(item?.sold)return{label:"SOLD",bg:C.greenL,color:C.green};if(st==="Awaiting Prep")return{label:"AWAITING PREP",bg:C.redL,color:C.red};if(st==="Awaiting Listing")return{label:"AWAITING LISTING",bg:"rgba(59,130,246,0.12)",color:C.blue};if(st==="Wash")return{label:"WASH",bg:"rgba(139,92,246,0.12)",color:C.purple};return{label:"LISTED",bg:C.goldL,color:C.gold};};
 const DI={width:"100%",padding:"11px 14px",border:`1.5px solid ${C.border2}`,borderRadius:10,fontSize:14,outline:"none",boxSizing:"border-box",fontFamily:"inherit",background:"rgba(255,255,255,0.05)",color:C.text,transition:"border-color 0.15s"};
 const LS={fontSize:11,fontWeight:700,color:C.text3,marginBottom:5,display:"block",textTransform:"uppercase",letterSpacing:"0.08em"};
 const GR=`*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',system-ui,sans-serif;background:#0C0F1D;color:#F1F5F9;min-height:100vh}input:focus,select:focus{border-color:#6366F1!important;outline:none;background:rgba(255,255,255,0.07)!important}input::placeholder{color:rgba(255,255,255,0.28)}select option{background:#1e2a3a;color:#F1F5F9}@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes slideIn{from{transform:translateX(-240px)}to{transform:translateX(0)}}@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}.fade{animation:fadeUp 0.2s ease forwards}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:11px 14px;white-space:nowrap}tbody tr:hover{background:rgba(99,102,241,0.04);cursor:pointer}@media(max-width:768px){.desk{display:none!important}}@media(min-width:769px){.mob{display:none!important}}`;
@@ -406,7 +407,7 @@ function ItemModal({item,onClose}){
   ];
   return<Modal title={item.title} onClose={onClose} ch={<>
     <div style={{display:"flex",gap:8,marginBottom:16}}>
-      <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:item.sold?C.greenL:stockStatus==="Awaiting Prep"?"rgba(59,130,246,0.12)":C.goldL,color:item.sold?C.green:stockStatus==="Awaiting Prep"?C.blue:C.gold}}>{item.sold?"SOLD":stockStatus.toUpperCase()}</span>
+      {(()=>{const b=stockBadgeStyle(item);return <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:b.bg,color:b.color}}>{b.label}</span>;})()}
       {item.sku&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{item.sku}</span>}
     </div>
     {rows.map(r=><div key={r.l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
@@ -660,7 +661,7 @@ function Inventory({inv,reload,navEdit}){
   const platforms=[...new Set(inv.map(i=>i.platform).filter(Boolean))];
   const filtered=inv.filter(i=>{
     const ms=!search||(i.sku||"").toLowerCase().includes(search.toLowerCase())||(i.title||"").toLowerCase().includes(search.toLowerCase());
-    const mx=status==="all"||(status==="listed"&&!i.sold)||(status==="sold"&&i.sold);
+    const mx=status==="all"||(status==="sold"&&i.sold)||(!i.sold&&status===(i.stock_status||"Listed"));
     const mp=platform==="all"||i.platform===platform;
     return ms&&mx&&mp;
   }).sort((a,b)=>{
@@ -683,7 +684,7 @@ function Inventory({inv,reload,navEdit}){
     </div>
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
       <input style={{...DI,flex:1,minWidth:160}} placeholder="Search SKU or title…" value={search} onChange={e=>setSearch(e.target.value)}/>
-      <select style={sel} value={status} onChange={e=>setStatus(e.target.value)}><option value="all">All Status</option><option value="listed">Listed</option><option value="sold">Sold</option></select>
+      <select style={sel} value={status} onChange={e=>setStatus(e.target.value)}><option value="all">All Status</option><option value="Awaiting Prep">Awaiting Prep</option><option value="Wash">Wash</option><option value="Awaiting Listing">Awaiting Listing</option><option value="Listed">Listed</option><option value="sold">Sold</option></select>
       <select style={sel} value={sort} onChange={e=>setSort(e.target.value)}><option value="date_desc">Listed: Newest</option><option value="date_asc">Listed: Oldest</option><option value="price_desc">Price ↓</option><option value="price_asc">Price ↑</option><option value="sold_desc">Sold: Recent</option><option value="profit_desc">Profit ↓</option></select>
       {platforms.length>0&&<select style={sel} value={platform} onChange={e=>setPlatform(e.target.value)}><option value="all">All Platforms</option>{platforms.map(p=><option key={p}>{p}</option>)}</select>}
     </div>
@@ -694,14 +695,15 @@ function Inventory({inv,reload,navEdit}){
             {["SKU","Title","Cost","Price","Qty","Profit","Status","Platform","Listed","Sold","Days"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>{h}</th>)}
           </tr></thead>
           <tbody>
-            {filtered.length===0&&<tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.text3}}>No items found.</td></tr>}
+            {filtered.length===0&&<tr><td colSpan={11} style={{padding:40,textAlign:"center",color:C.text3}}>No items found.</td></tr>}
             {filtered.map(item=>{const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;const stockStatus=item.stock_status||"Listed";return<tr key={item.id} onClick={()=>navEdit(item.sku)} style={{borderBottom:`1px solid ${C.border}`}}>
               <td><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{item.sku}</span></td>
               <td style={{color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}}>{item.title}</td>
               <td style={{color:C.text2}}>{item.cost!=null?fmt(item.cost):"—"}</td>
               <td style={{color:C.text,fontWeight:600}}>{fmt(item.price)}</td>
+              <td style={{color:C.text2,fontSize:12,fontWeight:700}}>{item.quantity??1}</td>
               <td style={{fontWeight:700,color:profit==null?C.text3:profit>=0?C.green:C.red}}>{profit!=null?fmt(profit):"—"}</td>
-              <td><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:item.sold?C.greenL:stockStatus==="Awaiting Prep"?"rgba(59,130,246,0.12)":C.goldL,color:item.sold?C.green:stockStatus==="Awaiting Prep"?C.blue:C.gold}}>{item.sold?"SOLD":stockStatus.toUpperCase()}</span></td>
+              <td>{(()=>{const b=stockBadgeStyle(item);return <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:b.bg,color:b.color}}>{b.label}</span>;})()}</td>
               <td style={{color:C.text2,fontSize:12}}>{item.platform||"—"}</td>
               <td style={{color:C.text3,fontSize:12}}>{item.created_at?new Date(item.created_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</td>
               <td style={{color:item.sold_at?C.green:C.text3,fontSize:12}}>{item.sold_at?new Date(item.sold_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</td>

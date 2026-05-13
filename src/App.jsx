@@ -749,7 +749,7 @@ function AddStock({biz,inv,reload,addForm,setAddForm}){
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Sel label="Category" ch={CATS.map(c=><option key={c}>{c}</option>)} value={addForm.category} onChange={f("category")}/>
-        <Sel label="Stock Status" req ch={["Listed","Awaiting Prep"].map(s=><option key={s}>{s}</option>)} value={addForm.stock_status||"Listed"} onChange={f("stock_status")}/>
+        <Sel label="Stock Status" req ch={["Awaiting Prep","Wash","Awaiting Listing","Listed"].map(s=><option key={s}>{s}</option>)} value={addForm.stock_status||"Listed"} onChange={f("stock_status")}/>
         <Input label="Storage Location" placeholder="e.g. Box 3" value={addForm.location} onChange={f("location")}/>
       </div>
       <Input label="Notes" placeholder="e.g. Size M, minor fading" value={addForm.note} onChange={f("note")}/>
@@ -800,7 +800,7 @@ function EditStock({biz,reload,editSku}){
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Sel label="Category" ch={CATS.map(c=><option key={c}>{c}</option>)} value={ed.category} onChange={e=>setEd(p=>({...p,category:e.target.value}))}/>
-        <Sel label="Stock Status" req ch={["Listed","Awaiting Prep"].map(s=><option key={s}>{s}</option>)} value={ed.stock_status||"Listed"} onChange={e=>setEd(p=>({...p,stock_status:e.target.value}))}/>
+        <Sel label="Stock Status" req ch={["Awaiting Prep","Wash","Awaiting Listing","Listed"].map(s=><option key={s}>{s}</option>)} value={ed.stock_status||"Listed"} onChange={e=>setEd(p=>({...p,stock_status:e.target.value}))}/>
         <Input label="Location" placeholder="e.g. Box 3" value={ed.location} onChange={e=>setEd(p=>({...p,location:e.target.value}))}/>
       </div>
       <Input label="Notes" value={ed.note} onChange={e=>setEd(p=>({...p,note:e.target.value}))}/>

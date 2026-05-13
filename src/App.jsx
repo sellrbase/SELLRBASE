@@ -287,7 +287,7 @@ function Shell({onOut}){
   const[inv,setInv]=useState([]);const[exp,setExp]=useState([]);const[cal,setCal]=useState([]);const[tgts,setTgts]=useState([]);
   const[loading,setLoading]=useState(false);const[sideOpen,setSideOpen]=useState(false);const[showBizSwitcher,setShowBizSwitcher]=useState(false);
   const[editSku,setEditSku]=useState("");
-  const[addForm,setAddForm]=useState({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:"",quantity:"1"});
+  const[addForm,setAddForm]=useState({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:"",quantity:"1",stock_status:"Listed"});
   const[expForm,setExpForm]=useState({date:"",amount:"",description:"",category:"Stock",due_date:"",recurring:false});
   const[alerts,dismissAlert]=useAlerts(inv,exp,tgts,biz?.id);
   const loadBiz=useCallback(async()=>{
@@ -388,6 +388,7 @@ function Shell({onOut}){
 }
 function ItemModal({item,onClose}){
   const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;
+  const stockStatus=item.stock_status||"Listed";
   const daysToSell=item.sold&&item.sold_at&&item.created_at&&item.sold_at>="2026-05-02"?daysBetween(item.created_at,item.sold_at):null;
   const rows=[
     {l:"SKU",v:item.sku||"—"},
@@ -405,7 +406,7 @@ function ItemModal({item,onClose}){
   ];
   return<Modal title={item.title} onClose={onClose} ch={<>
     <div style={{display:"flex",gap:8,marginBottom:16}}>
-      <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:item.sold?C.greenL:C.goldL,color:item.sold?C.green:C.gold}}>{item.sold?"SOLD":"LISTED"}</span>
+      <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:item.sold?C.greenL:stockStatus==="Awaiting Prep"?"rgba(59,130,246,0.12)":C.goldL,color:item.sold?C.green:stockStatus==="Awaiting Prep"?C.blue:C.gold}}>{item.sold?"SOLD":stockStatus.toUpperCase()}</span>
       {item.sku&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{item.sku}</span>}
     </div>
     {rows.map(r=><div key={r.l} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
@@ -694,13 +695,13 @@ function Inventory({inv,reload,navEdit}){
           </tr></thead>
           <tbody>
             {filtered.length===0&&<tr><td colSpan={10} style={{padding:40,textAlign:"center",color:C.text3}}>No items found.</td></tr>}
-            {filtered.map(item=>{const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;return<tr key={item.id} onClick={()=>navEdit(item.sku)} style={{borderBottom:`1px solid ${C.border}`}}>
+            {filtered.map(item=>{const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;const stockStatus=item.stock_status||"Listed";return<tr key={item.id} onClick={()=>navEdit(item.sku)} style={{borderBottom:`1px solid ${C.border}`}}>
               <td><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{item.sku}</span></td>
               <td style={{color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}}>{item.title}</td>
               <td style={{color:C.text2}}>{item.cost!=null?fmt(item.cost):"—"}</td>
               <td style={{color:C.text,fontWeight:600}}>{fmt(item.price)}</td>
               <td style={{fontWeight:700,color:profit==null?C.text3:profit>=0?C.green:C.red}}>{profit!=null?fmt(profit):"—"}</td>
-              <td><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:item.sold?C.greenL:C.goldL,color:item.sold?C.green:C.gold}}>{item.sold?"SOLD":"LISTED"}</span></td>
+              <td><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:item.sold?C.greenL:stockStatus==="Awaiting Prep"?"rgba(59,130,246,0.12)":C.goldL,color:item.sold?C.green:stockStatus==="Awaiting Prep"?C.blue:C.gold}}>{item.sold?"SOLD":stockStatus.toUpperCase()}</span></td>
               <td style={{color:C.text2,fontSize:12}}>{item.platform||"—"}</td>
               <td style={{color:C.text3,fontSize:12}}>{item.created_at?new Date(item.created_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</td>
               <td style={{color:item.sold_at?C.green:C.text3,fontSize:12}}>{item.sold_at?new Date(item.sold_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</td>
@@ -727,13 +728,13 @@ function AddStock({biz,inv,reload,addForm,setAddForm}){
     if(!addForm.title||!addForm.price)return;setBusy(true);setErr(null);
     const qty=Math.max(1,parseInt(addForm.quantity)||1);
     const cost=addForm.cost?r2(parseFloat(addForm.cost)):null;
-    const{error}=await supabase.from("inventory").insert([{business_id:biz.id,sku:addForm.sku.trim().toUpperCase()||null,title:addForm.title.trim(),cost,price:r2(parseFloat(addForm.price)),note:addForm.note.trim()||null,category:addForm.category||"Other",location:addForm.location.trim()||null,sold:false,quantity:qty}]);
+    const{error}=await supabase.from("inventory").insert([{business_id:biz.id,sku:addForm.sku.trim().toUpperCase()||null,title:addForm.title.trim(),cost,price:r2(parseFloat(addForm.price)),note:addForm.note.trim()||null,category:addForm.category||"Other",location:addForm.location.trim()||null,sold:false,quantity:qty,stock_status:addForm.stock_status||"Listed"}]);
     if(error){setErr(error.message);setBusy(false);return;}
     if(cost&&cost>0){
       const totalCost=r2(cost*qty);
       await supabase.from("expenses").insert([{business_id:biz.id,date:today(),amount:totalCost,description:`Stock purchase: ${addForm.title.trim()}${qty>1?` (x${qty})`:""}`,category:"Stock"}]);
     }
-    setAddForm({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:"",quantity:"1"});setOk(true);setTimeout(()=>setOk(false),3000);reload();
+    setAddForm({sku:"",title:"",cost:"",price:"",note:"",category:"Clothing",location:"",quantity:"1",stock_status:"Listed"});setOk(true);setTimeout(()=>setOk(false),3000);reload();
     setBusy(false);
   };
   return<div style={{maxWidth:560,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 660px) / 2))"}}>
@@ -748,6 +749,7 @@ function AddStock({biz,inv,reload,addForm,setAddForm}){
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Sel label="Category" ch={CATS.map(c=><option key={c}>{c}</option>)} value={addForm.category} onChange={f("category")}/>
+        <Sel label="Stock Status" req ch={["Listed","Awaiting Prep"].map(s=><option key={s}>{s}</option>)} value={addForm.stock_status||"Listed"} onChange={f("stock_status")}/>
         <Input label="Storage Location" placeholder="e.g. Box 3" value={addForm.location} onChange={f("location")}/>
       </div>
       <Input label="Notes" placeholder="e.g. Size M, minor fading" value={addForm.note} onChange={f("note")}/>

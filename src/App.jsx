@@ -767,11 +767,11 @@ function EditStock({biz,reload,editSku}){
   const doSearch=async(sku)=>{
     const s=(sku||q).trim();if(!s)return;setNf(false);setFound(null);setOk(false);setErr(null);
     const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",s).single();
-    if(!data)setNf(true);else{setFound(data);setEd({price:data.price,note:data.note||"",category:data.category||"Clothing",location:data.location||"",quantity:data.quantity||1});}
+    if(!data)setNf(true);else{setFound(data);setEd({price:data.price,note:data.note||"",category:data.category||"Clothing",stock_status:data.stock_status||"Listed",location:data.location||"",quantity:data.quantity||1});}
   };
   const save=async()=>{
     if(!ed)return;setBusy(true);setErr(null);
-    const updates={price:r2(parseFloat(ed.price)),note:ed.note||null,category:ed.category,location:ed.location||null,quantity:Math.max(1,parseInt(ed.quantity)||1)};
+    const updates={price:r2(parseFloat(ed.price)),note:ed.note||null,category:ed.category,stock_status:ed.stock_status||"Listed",location:ed.location||null,quantity:Math.max(1,parseInt(ed.quantity)||1)};
     const{error}=await supabase.from("inventory").update(updates).eq("id",found.id);
     if(error)setErr(error.message);else{setOk(true);setTimeout(()=>setOk(false),2500);reload();setFound(p=>({...p,...updates}));}
     setBusy(false);
@@ -800,6 +800,7 @@ function EditStock({biz,reload,editSku}){
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Sel label="Category" ch={CATS.map(c=><option key={c}>{c}</option>)} value={ed.category} onChange={e=>setEd(p=>({...p,category:e.target.value}))}/>
+        <Sel label="Stock Status" req ch={["Listed","Awaiting Prep"].map(s=><option key={s}>{s}</option>)} value={ed.stock_status||"Listed"} onChange={e=>setEd(p=>({...p,stock_status:e.target.value}))}/>
         <Input label="Location" placeholder="e.g. Box 3" value={ed.location} onChange={e=>setEd(p=>({...p,location:e.target.value}))}/>
       </div>
       <Input label="Notes" value={ed.note} onChange={e=>setEd(p=>({...p,note:e.target.value}))}/>

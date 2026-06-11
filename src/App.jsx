@@ -597,16 +597,16 @@ function QuickSale({inv,biz,reload}){
   const[busy,setBusy]=useState(false);const[ok,setOk]=useState(false);const[err,setErr]=useState(null);
   const[platform,setPlatform]=useState("eBay");const[qtySold,setQtySold]=useState(1);
   const PLATS=["eBay","Vinted","Depop","Poshmark","Facebook","Instagram","Etsy","Other"];
-  const search=async()=>{setNf(false);setFound(null);setOk(false);setErr(null);const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",q.trim()).single();if(!data)setNf(true);else{setFound(data);setSoldFor(String(data.price));setAtList(true);setQtySold(1);}};
+  const search=async()=>{setNf(false);setFound(null);setOk(false);setErr(null);const sku=q.trim();if(!sku)return;const{data,error}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",sku);if(error){setErr(error.message);return;}const rows=data||[];if(!rows.length){setNf(true);return;}const available=rows.find(i=>!i.sold&&(i.quantity??1)>0);if(!available){setErr("No available stock left for this SKU. If it was marked as sold by mistake, use Mark as Unsold from Inventory or Edit Stock.");return;}setFound(available);setSoldFor(String(available.price));setAtList(true);setQtySold(1);};
   const save=async()=>{
-    if(!found)return;if(!atList&&(!soldFor||parseFloat(soldFor)<=0)){setErr("Enter the sold price.");return;}
+    if(!found)return;if(found.sold||(found.quantity??1)<=0){setErr("This item has already been marked as sold or has no available quantity left.");return;}if(!atList&&(!soldFor||parseFloat(soldFor)<=0)){setErr("Enter the sold price.");return;}
     setBusy(true);setErr(null);
     const sp=atList?r2(found.price):r2(parseFloat(soldFor));
     const qty=Math.max(1,Math.min(qtySold,found.quantity||1));
     const remaining=(found.quantity||1)-qty;
     if(remaining<=0){
       // all sold - mark item as sold
-      const{error}=await supabase.from("inventory").update({sold:true,sold_at:soldAt,sold_price:sp,platform,quantity:0}).eq("id",found.id);
+      const{error}=await supabase.from("inventory").update({sold:true,sold_at:soldAt,sold_price:sp,platform,quantity:qty}).eq("id",found.id);
       if(error){setErr(error.message);setBusy(false);return;}
     } else {
       // partial - reduce quantity, insert sold record for analytics
@@ -658,6 +658,7 @@ function QuickSale({inv,biz,reload}){
 function Inventory({inv,reload,navEdit}){
   const[search,setSearch]=useState("");const[status,setStatus]=useState("all");const[sort,setSort]=useState("date_desc");const[platform,setPlatform]=useState("all");
   const listed=inv.filter(i=>!i.sold);const sold=inv.filter(i=>i.sold);
+  const markUnsold=async item=>{if(!item||!window.confirm(`Mark "${item.title}" as unsold and return it to listed stock?`))return;const qty=Math.max(1,parseInt(item.quantity)||1);await supabase.from("inventory").update({sold:false,sold_at:null,sold_price:null,platform:null,quantity:qty,stock_status:item.stock_status||"Listed"}).eq("id",item.id);reload();};
   const platforms=[...new Set(inv.map(i=>i.platform).filter(Boolean))];
   const filtered=inv.filter(i=>{
     const ms=!search||(i.sku||"").toLowerCase().includes(search.toLowerCase())||(i.title||"").toLowerCase().includes(search.toLowerCase());
@@ -679,8 +680,8 @@ function Inventory({inv,reload,navEdit}){
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
       <StatCard icon="📦" label="Listed" value={listed.length} color={C.gold}/>
       <StatCard icon="✅" label="Sold" value={sold.length} color={C.green}/>
-      <StatCard icon="💰" label="Stock Value" value={fmt(listed.reduce((s,i)=>s+i.price,0))} color={C.blue}/>
-      <StatCard icon="💹" label="Cost in Stock" value={fmt(listed.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0))} color={C.purple}/>
+      <StatCard icon="💰" label="Stock Value" value={fmt(listed.reduce((s,i)=>s+(i.price*(i.quantity||1)),0))} color={C.blue}/>
+      <StatCard icon="💹" label="Cost in Stock" value={fmt(listed.filter(i=>i.cost).reduce((s,i)=>s+(i.cost*(i.quantity||1)),0))} color={C.purple}/>
     </div>
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
       <input style={{...DI,flex:1,minWidth:160}} placeholder="Search SKU or title…" value={search} onChange={e=>setSearch(e.target.value)}/>
@@ -692,11 +693,11 @@ function Inventory({inv,reload,navEdit}){
       <div style={{overflowX:"auto"}}>
         <table>
           <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:C.card2}}>
-            {["SKU","Title","Cost","Price","Qty","Profit","Status","Platform","Listed","Sold","Days"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>{h}</th>)}
+            {["SKU","Title","Cost","Price","Qty","Profit","Status","Platform","Listed","Sold","Days","Actions"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>{h}</th>)}
           </tr></thead>
           <tbody>
-            {filtered.length===0&&<tr><td colSpan={11} style={{padding:40,textAlign:"center",color:C.text3}}>No items found.</td></tr>}
-            {filtered.map(item=>{const profit=item.cost!=null?r2((item.sold_price||item.price)-item.cost):null;const stockStatus=item.stock_status||"Listed";return<tr key={item.id} onClick={()=>navEdit(item.sku)} style={{borderBottom:`1px solid ${C.border}`}}>
+            {filtered.length===0&&<tr><td colSpan={12} style={{padding:40,textAlign:"center",color:C.text3}}>No items found.</td></tr>}
+            {filtered.map(item=>{const qty=item.quantity||1;const profit=item.cost!=null?r2(((item.sold_price||item.price)-item.cost)*qty):null;const stockStatus=item.stock_status||"Listed";return<tr key={item.id} onClick={()=>navEdit(item.sku)} style={{borderBottom:`1px solid ${C.border}`}}>
               <td><span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:6,background:C.goldL,color:C.gold}}>{item.sku}</span></td>
               <td style={{color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}}>{item.title}</td>
               <td style={{color:C.text2}}>{item.cost!=null?fmt(item.cost):"—"}</td>
@@ -708,6 +709,7 @@ function Inventory({inv,reload,navEdit}){
               <td style={{color:C.text3,fontSize:12}}>{item.created_at?new Date(item.created_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</td>
               <td style={{color:item.sold_at?C.green:C.text3,fontSize:12}}>{item.sold_at?new Date(item.sold_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"—"}</td>
               <td style={{color:C.accent,fontSize:12,fontWeight:700}}>{daysListed(item)}</td>
+              <td>{item.sold&&<Btn ch="Mark Unsold" onClick={e=>{e.stopPropagation();markUnsold(item);}} variant="ghost" small/>}</td>
             </tr>;})}
           </tbody>
         </table>
@@ -768,8 +770,9 @@ function EditStock({biz,reload,editSku}){
   useEffect(()=>{if(editSku)doSearch(editSku);},[]);
   const doSearch=async(sku)=>{
     const s=(sku||q).trim();if(!s)return;setNf(false);setFound(null);setOk(false);setErr(null);
-    const{data}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",s).single();
-    if(!data)setNf(true);else{setFound(data);setEd({price:data.price,note:data.note||"",category:data.category||"Clothing",stock_status:data.stock_status||"Listed",location:data.location||"",quantity:data.quantity||1});}
+    const{data,error}=await supabase.from("inventory").select("*").eq("business_id",biz.id).ilike("sku",s);
+    if(error){setErr(error.message);return;}const rows=data||[];const dataRow=rows.find(i=>!i.sold&&(i.quantity??1)>0)||rows[0];
+    if(!dataRow)setNf(true);else{setFound(dataRow);setEd({price:dataRow.price,note:dataRow.note||"",category:dataRow.category||"Clothing",stock_status:dataRow.stock_status||"Listed",location:dataRow.location||"",quantity:dataRow.quantity||1});}
   };
   const save=async()=>{
     if(!ed)return;setBusy(true);setErr(null);
@@ -779,6 +782,7 @@ function EditStock({biz,reload,editSku}){
     setBusy(false);
   };
   const del=async()=>{if(!found||!window.confirm("Delete permanently?"))return;await supabase.from("inventory").delete().eq("id",found.id);setFound(null);setEd(null);setQ("");reload();};
+  const markUnsold=async()=>{if(!found||!found.sold)return;if(!window.confirm(`Mark "${found.title}" as unsold and return it to listed stock?`))return;setBusy(true);setErr(null);const qty=Math.max(1,parseInt(found.quantity)||1);const updates={sold:false,sold_at:null,sold_price:null,platform:null,quantity:qty,stock_status:found.stock_status||"Listed"};const{error}=await supabase.from("inventory").update(updates).eq("id",found.id);if(error)setErr(error.message);else{setOk(true);setFound(p=>({...p,...updates}));setEd(p=>({...p,quantity:qty,stock_status:updates.stock_status}));reload();}setBusy(false);};
   return<div style={{maxWidth:560,margin:"0 auto",paddingTop:"calc(max(0px,(100vh - 500px) / 2))"}}>    
     <PageHdr title="Edit Stock" sub="QUICK ACTIONS"/>
     <Card ch={<div style={{display:"flex",gap:10}}>
@@ -807,7 +811,7 @@ function EditStock({biz,reload,editSku}){
       </div>
       <Input label="Notes" value={ed.note} onChange={e=>setEd(p=>({...p,note:e.target.value}))}/>
       {err&&<Msg ch={err}/>}{ok&&<Msg ok ch="✅ Changes saved!"/>}
-      <div style={{display:"flex",gap:10}}><Btn ch={busy?"Saving…":"Save Changes"} onClick={save} disabled={!ed||busy} full/><Btn ch="Delete" onClick={del} variant="danger"/></div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}><Btn ch={busy?"Saving...":"Save Changes"} onClick={save} disabled={!ed||busy} full/><Btn ch="Delete" onClick={del} variant="danger"/>{found.sold&&<Btn ch="Mark as Unsold" onClick={markUnsold} variant="ghost" disabled={busy}/>}</div>
     </div>}/>}
   </div>;
 }
@@ -1142,9 +1146,13 @@ function TaxSummary({inv,exp}){
   const y1=parseInt(yr.split("/")[0]);
   const start=`${y1}-04-06`;const end=`${y1+1}-04-05`;
   const yrSales=inv.filter(i=>i.sold&&getSaleDate(i)).filter(i=>{const d=getSaleDate(i);return d>=start&&d<=end;});
-  const yrExp=exp.filter(e=>{const d=e.date;return d>=start&&d<=end;});
-  const totalSales=r2(yrSales.reduce((s,i)=>s+(i.sold_price||i.price),0));
-  const totalCosts=r2(yrSales.filter(i=>i.cost).reduce((s,i)=>s+i.cost,0));
+  const yrExpAll=exp.filter(e=>{const d=e.date;return d>=start&&d<=end;});
+  const isAutoStockExp=e=>e.category==="Stock"&&(e.description||"").startsWith("Stock purchase:");
+  const ignoredStockExp=yrExpAll.filter(isAutoStockExp);
+  const yrExp=yrExpAll.filter(e=>!isAutoStockExp(e));
+  const totalSales=r2(yrSales.reduce((s,i)=>s+((i.sold_price||i.price)*(i.quantity||1)),0));
+  const totalCosts=r2(yrSales.filter(i=>i.cost).reduce((s,i)=>s+(i.cost*(i.quantity||1)),0));
+  const ignoredStockTotal=r2(ignoredStockExp.reduce((s,e)=>s+e.amount,0));
   const totalExp=r2(yrExp.reduce((s,e)=>s+e.amount,0));
   const grossProfit=r2(totalSales-totalCosts);
   const netProfit=r2(grossProfit-totalExp);
@@ -1162,13 +1170,15 @@ function TaxSummary({inv,exp}){
   });
   const exportCSV=()=>{
     const rows=[["Type","Date","Description","Amount","Category"]];
-    yrSales.forEach(s=>rows.push(["Sale",getSaleDate(s),s.title||"Sale",s.sold_price||s.price,""]));
+    yrSales.forEach(s=>rows.push(["Sale",getSaleDate(s),s.title||"Sale",(s.sold_price||s.price)*(s.quantity||1),""]));
     yrExp.forEach(e=>rows.push(["Expense",e.date,e.description,e.amount,e.category||""]));
+    ignoredStockExp.forEach(e=>rows.push(["Auto stock expense ignored",e.date,e.description,e.amount,e.category||""]));
     const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(",")).join("\n");
     const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download=`vaultr_tax_${yr.replace("/","_")}.csv`;a.click();
   };
   return<div>
-    <AlertBox type="warning" ch="This is an organisational tool only — not financial or tax advice. Consult a qualified professional."/>
+    <AlertBox type="warning" ch="This is an organisational tool only - not financial or tax advice. Consult a qualified professional."/>
+    <AlertBox type="info" ch={`Stock added through Add Stock is counted through sold item costs, so matching auto-created Stock purchase expenses are ignored here to avoid double-counting. Manual stock expenses still count. ${ignoredStockTotal>0?`${fmt(ignoredStockTotal)} ignored this tax year.`:""}`}/>
     <PageHdr title="Tax Summary" sub="INSIGHTS" action={<Btn ch="Export CSV" onClick={exportCSV} variant="ghost"/>}/>
     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20}}>
       {YEARS.map(y=><button key={y} onClick={()=>setYr(y)} style={{padding:"7px 14px",borderRadius:20,border:`1.5px solid ${yr===y?C.accent:C.border2}`,background:yr===y?C.accentL:"transparent",color:yr===y?C.accent:C.text2,fontWeight:yr===y?700:400,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{y}</button>)}
@@ -1190,7 +1200,7 @@ function TaxSummary({inv,exp}){
         <table>
           <thead><tr style={{borderBottom:`1px solid ${C.border}`,background:C.card2}}>{["Period","Sales","Expenses","Net"].map(h=><th key={h} style={{fontSize:10,fontWeight:700,color:C.text3,textTransform:"uppercase",letterSpacing:"0.08em"}}>{h}</th>)}</tr></thead>
           <tbody>{periods.map(p=>{
-            const ps=r2(yrSales.filter(s=>getSaleDate(s)>=p.s&&getSaleDate(s)<=p.e).reduce((s,i)=>s+(i.sold_price||i.price),0));
+            const ps=r2(yrSales.filter(s=>getSaleDate(s)>=p.s&&getSaleDate(s)<=p.e).reduce((s,i)=>s+((i.sold_price||i.price)*(i.quantity||1)),0));
             const pe=r2(yrExp.filter(e=>e.date>=p.s&&e.date<=p.e).reduce((s,e)=>s+e.amount,0));
             const net=r2(ps-pe);
             return<tr key={p.l} style={{borderBottom:`1px solid ${C.border}`}}>
